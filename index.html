@@ -417,21 +417,178 @@
     startScanner();
   }
 
-function endAttendanceSession() {
-    if (confirm("Are you sure you want to end this attendance session?")) {
-      if (window.html5QrcodeScanner) {
-        window.html5QrcodeScanner.clear().catch(err => console.error("Scanner clear error:", err));
-        window.html5QrcodeScanner = null;
-      }
+function endSession() {
+    if (!confirm("End this attendance session?")) return;
+    if (html5QrCode) { html5QrCode.stop().catch(()=>{}); html5QrCode = null; }
+    SESSION = null;
+    document.getElementById("sessionStrip").classList.remove("show");
+    document.getElementById("scanStage").classList.remove("show");
+    document.getElementById("setupPane").style.display = "block";
+  }
 
-      document.getElementById("att-setup-section").style.display = "block";
-      document.getElementById("att-active-header").style.display = "none";
-      document.getElementById("att-scanning-section").style.display = "none";
-      resetScannedStudentCard();
+  // ---------- Scanning + verification sheet ----------
+  const sheet = document.getElementById("sheet");
+  const backdrop = document.getElementById("backdrop");
+  const flashEl = document.getElementById("flash");
+  const toastEl = document.getElementById("toast");
+  const approveBtn = document.getElementById("approveBtn");
+  const rejectBtn = document.getElementById("rejectBtn");
+
+  function showToast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add("show");
+    setTimeout(() => toastEl.classList.remove("show"), 2200);
+  }
+  function flash(color) {
+    flashEl.style.background = color; flashEl.classList.remove("on");
+    void flashEl.offsetWidth; flashEl.classList.add("on");
+  }
+  function openSheet() { backdrop.classList.add("show"); sheet.classList.add("show"); }
+  function closeSheet() {
+    backdrop.classList.remove("show"); sheet.classList.remove("show");
+    setTimeout(() => { if (html5QrCode) html5QrCode.resume().catch(()=>{}); }, 300);
+  }
+  function renderChecklist(rows) {
+    const el = document.getElementById("checklist");
+    el.innerHTML = rows.map(r =>
+      `<div class="check-row ${r.pass === null ? '' : r.pass ? 'pass' : 'fail'}">
+         <span class="icon">${r.pass === null ? '…' : r.pass ? '✓' : '✕'}</span><span>${r.label}</span>
+       </div>`
+    ).join("");
+  }
+
+  async function lookupStudent(qrValue) {
+    try {
+      const res = await callServer("getStudentByQrCode", { qrText: qrValue });
+      return res && res.found ? res : null;
+    } catch (e) {
+      return MOCK_STUDENTS.find(s => s.qr === qrValue) || null;
     }
   }
 
-  function startScannerEngine() {
-    window.html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 
-  
-    
+  async function onScanSuccess(decodedText) {
+    if (scannerBusy) return;
+    scannerBusy = true;
+    html5QrCode.pause();
+
+    const photo = document.getElementById("studentPhoto");
+    const nameEl = document.getElementById("studentName");
+    const metaEl = document.getElementById("studentMeta");
+
+    photo.src = ""; photo.classList.add("pending");
+    nameEl.textContent = "Looking up…"; metaEl.textContent = decodedText;
+    renderChecklist([{ label: "Matching student ID", pass: null }]);
+    approveBtn.classList.remove("ready"); approveBtn.disabled = true; approveBtn.textContent = "Mark present";
+    openSheet();
+
+    const student = await lookupStudent(decodedText);
+    currentStudent = student;
+
+    if (!student) {
+      flash("rgba(226,96,79,0.5)");
+      nameEl.textContent = "Not recognized"; metaEl.textContent = decodedText;
+      renderChecklist([{ label: "No matching student record", pass: false }]);
+      return;
+    }
+
+    photo.src = student.photo || student.pictureURL || "";
+    photo.classList.remove("pending");
+    nameEl.textContent = student.name || student.fullName;
+    metaEl.textContent = `${student.id || student.studentID} · ${student.programme}`;
+
+    const enrolled = (student.programme === SESSION.programme);
+    renderChecklist([
+      { label: "Student record found", pass: true },
+      { label: `Enrolled in ${SESSION.programme}`, pass: enrolled }
+    ]);
+
+    if (enrolled) {
+      flash("rgba(217,164,65,0.35)");
+      approveBtn.disabled = false; approveBtn.classList.add("ready");
+    } else {
+      flash("rgba(226,96,79,0.5)");
+      approveBtn.disabled = true;
+    }
+  }
+
+  async function startScanner() {
+    html5QrCode = new Html5Qrcode("reader");
+    try {
+      await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, onScanSuccess, () => {});
+    } catch (err) {
+      showToast("Camera unavailable: " + err);
+    }
+  }
+
+  approveBtn.addEventListener("click", async () => {
+    if (!currentStudent || approveBtn.disabled) return;
+    approveBtn.disabled = true; approveBtn.textContent = "Saving…";
+
+    const payload = {
+      studentID: currentStudent.id || currentStudent.studentID,
+      studentName: currentStudent.name || currentStudent.fullName,
+      programme: SESSION.programme, semester: SESSION.semester,
+      course: SESSION.course, lesson: SESSION.lesson, entryType: "QR Scan"
+    };
+
+    let ok = true, newCount = null;
+    try {
+      const res = await callServer("saveApprovedAttendance", payload);
+      ok = !!(res && res.success); newCount = res && res.newCount;
+    } catch (e) { /* mock mode: assume success */ }
+
+    if (ok) {
+      bumpCount(newCount != null ? newCount : undefined);
+      approveBtn.textContent = "Marked present ✓";
+      setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
+    } else {
+      approveBtn.textContent = "Retry"; approveBtn.disabled = false;
+    }
+  });
+  rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
+  backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
+
+  // ---------- Manual mode ----------
+  async function submitManual() {
+    const programme = document.getElementById("manualProgramme").value;
+    const course = document.getElementById("manualCourse").value;
+    const date = document.getElementById("manualDate").value;
+    const lesson = document.getElementById("manualLesson").value.trim();
+    const raw = document.getElementById("manualStudent").value;
+    const status = document.getElementById("manualStatus").value;
+
+    if (!programme || !course || !date || !lesson || !raw) {
+      alert("Please fill in every field before saving."); return;
+    }
+
+    const student = JSON.parse(raw);
+    const btn = document.getElementById("manualSaveBtn");
+    btn.disabled = true;
+
+    const payload = { programme, course, date, lesson, studentID: student.studentID, studentName: student.studentName, status };
+    const card = document.getElementById("manualStatusCard");
+
+    let ok = true, newCount = null;
+    try {
+      const res = await callServer("saveManualAttendance", payload);
+      ok = !!(res && res.success); newCount = res && res.newCount;
+    } catch (e) { /* mock mode */ }
+
+    btn.disabled = false;
+    card.classList.add("show");
+    if (ok) {
+      card.className = "status-card show ok";
+      card.textContent = "Attendance record saved.";
+      bumpCount(newCount != null ? newCount : undefined);
+    } else {
+      card.className = "status-card show err";
+      card.textContent = "Couldn't save — try again.";
+    }
+  }
+
+  // ---------- Init ----------
+  document.getElementById("manualDate").value = new Date().toISOString().split("T")[0];
+  loadProgrammes();
+  loadTodayCount();
+</script>
+</body>
+</html>
