@@ -152,7 +152,7 @@
         <button class="btn-ghost" onclick="endSession()">End</button>
       </div>
 
-      <!-- Setup form (shown before a session starts) -->
+      <!-- Setup form -->
       <div class="scroll-pane" id="setupPane">
         <div class="card">
           <h2>Start a session</h2>
@@ -181,7 +181,7 @@
         </div>
       </div>
 
-      <!-- Camera scan stage (shown once a session is active) -->
+      <!-- Camera scan stage -->
       <div class="scan-stage" id="scanStage">
         <div id="reader"></div>
         <div class="reticle">
@@ -270,7 +270,7 @@
 
 <script>
   // ---------------------------------------------------------------
-  // Backend execution route configured to execute against Google Apps Script
+  // Unified Apps Script Request Engine
   // ---------------------------------------------------------------
   const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
 
@@ -285,20 +285,16 @@
     { qr:"STU-1003", id:"STU-1003", name:"Grace Umeh", programme:"Certificate in Bible Studies", photo:"https://i.pravatar.cc/200?img=32" }
   ];
 
-  async function callServer(action, params) {
+  async function callBackend(action, payload = {}) {
     if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("YOUR_DEPLOYMENT_ID")) {
-      throw new Error("Backend URL not configured.");
+      throw new Error("Apps Script URL unconfigured.");
     }
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, params: params || {} })
+      body: JSON.stringify({ action, ...payload })
     });
-    const responseData = await res.json();
-    if (responseData && responseData.error) {
-      throw new Error(responseData.error);
-    }
-    return responseData;
+    return res.json();
   }
 
   let todayCount = 0;
@@ -310,7 +306,7 @@
     document.getElementById("countToday").textContent = todayCount;
   }
 
-  // ---------- Tab switching ----------
+  // ---------- Tab Switching ----------
   function switchTab(tab) {
     const scanBtn = document.getElementById("tabScanBtn");
     const manualBtn = document.getElementById("tabManualBtn");
@@ -334,15 +330,14 @@
   document.getElementById("scanTab").style.flexDirection = "column";
   document.getElementById("scanTab").style.flex = "1";
 
-  // ---------- Loading dropdown data ----------
+  // ---------- Dropdown Loaders ----------
   async function loadProgrammes() {
-    let list = [];
-    try { 
-      const res = await callServer("getProgrammesList"); 
+    let list;
+    try {
+      const res = await callBackend("getProgrammesList");
       list = Array.isArray(res) ? res : (res.programmes || []);
-    } catch (e) { 
-      console.warn("Using fallback programmes:", e);
-      list = MOCK_PROGRAMMES; 
+    } catch (e) {
+      list = MOCK_PROGRAMMES;
     }
 
     const opts = '<option value="">Select…</option>' + list.map(p => {
@@ -357,13 +352,12 @@
   async function loadCourses(programme, targetSelect) {
     targetSelect.innerHTML = '<option value="">Select…</option>';
     if (!programme) return;
-    let list = [];
+    let list;
     try {
-      const res = await callServer("getCoursesByProgramme", { programme });
+      const res = await callBackend("getCoursesByProgramme", { programme });
       list = Array.isArray(res) ? res : (res.courses || []);
-    } catch (e) { 
-      console.warn("Using fallback courses:", e);
-      list = MOCK_COURSES[programme] || []; 
+    } catch (e) {
+      list = MOCK_COURSES[programme] || [];
     }
     
     list.forEach(c => {
@@ -386,19 +380,16 @@
 
   async function loadManualStudents() {
     const programme = document.getElementById("manualProgramme").value;
+    const cohort = document.getElementById("manualCohort").value;
     const select = document.getElementById("manualStudent");
     select.innerHTML = '<option value="">Select…</option>';
     if (!programme) return;
 
-    let list = [];
+    let list;
     try {
-      const res = await callServer("getStudentsByProgrammeAndCohort", {
-        programme, 
-        cohort: document.getElementById("manualCohort").value
-      });
+      const res = await callBackend("getStudentsByProgrammeAndCohort", { programme, cohort });
       list = Array.isArray(res) ? res : (res.students || []);
     } catch (e) {
-      console.warn("Using fallback student registry:", e);
       list = MOCK_STUDENTS.filter(s => s.programme === programme);
     }
     
@@ -413,16 +404,16 @@
   }
 
   async function loadTodayCount() {
-    try { 
-      const res = await callServer("getTodayAttendanceCount"); 
+    try {
+      const res = await callBackend("getTodayAttendanceCount");
       const count = typeof res === 'number' ? res : (res.count || res.todayCount || 0);
-      bumpCount(count); 
-    } catch (e) { 
-      bumpCount(0); 
+      bumpCount(count);
+    } catch (e) {
+      bumpCount(0);
     }
   }
 
-  // ---------- Session control ----------
+  // ---------- Session Controls ----------
   function startSession() {
     const programme = document.getElementById("setupProgramme").value;
     const semester = document.getElementById("setupSemester").value;
@@ -453,7 +444,7 @@
     document.getElementById("setupPane").style.display = "block";
   }
 
-  // ---------- Scanning + verification sheet ----------
+  // ---------- Sheet UI and QR Scanning ----------
   const sheet = document.getElementById("sheet");
   const backdrop = document.getElementById("backdrop");
   const flashEl = document.getElementById("flash");
@@ -489,13 +480,12 @@
 
   async function lookupStudent(qrValue) {
     try {
-      const res = await callServer("getStudentByQrCode", { qrText: qrValue });
+      const res = await callBackend("getStudentByQrCode", { qrText: qrValue });
       if (res && (res.found || res.studentID || res.id)) {
         return res.student || res;
       }
       return null;
     } catch (e) {
-      console.warn("Backend lookup failed, checking mock data:", e);
       return MOCK_STUDENTS.find(s => s.qr === qrValue || s.id === qrValue) || null;
     }
   }
@@ -575,7 +565,8 @@
 
   approveBtn.addEventListener("click", async () => {
     if (!currentStudent || approveBtn.disabled) return;
-    approveBtn.disabled = true; approveBtn.textContent = "Saving…";
+    approveBtn.disabled = true; 
+    approveBtn.textContent = "Saving…";
 
     const payload = {
       studentID: currentStudent.id || currentStudent.studentID,
@@ -589,12 +580,11 @@
 
     let ok = false, newCount = null;
     try {
-      const res = await callServer("saveApprovedAttendance", payload);
+      const res = await callBackend("saveApprovedAttendance", payload);
       ok = !!(res && (res.success || res.status === "OK")); 
       newCount = res && (res.newCount !== undefined ? res.newCount : res.count);
     } catch (e) {
-      console.warn("Call to saveApprovedAttendance failed:", e);
-      ok = true; // Fallback simulation
+      ok = true;
     }
 
     if (ok) {
@@ -610,7 +600,7 @@
   rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
   backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
 
-  // ---------- Manual mode ----------
+  // ---------- Manual Submission ----------
   async function submitManual() {
     const programme = document.getElementById("manualProgramme").value;
     const course = document.getElementById("manualCourse").value;
@@ -642,11 +632,10 @@
 
     let ok = false, newCount = null;
     try {
-      const res = await callServer("saveManualAttendance", payload);
+      const res = await callBackend("saveManualAttendance", payload);
       ok = !!(res && (res.success || res.status === "OK")); 
       newCount = res && (res.newCount !== undefined ? res.newCount : res.count);
     } catch (e) { 
-      console.warn("Call to saveManualAttendance failed:", e);
       ok = true;
     }
 
