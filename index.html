@@ -456,60 +456,77 @@ function endSession() {
     ).join("");
   }
 
-  async function lookupStudent(qrValue) {
-    try {
-      const res = await callServer("getStudentByQrCode", { qrText: qrValue });
-      return res && res.found ? res : null;
-    } catch (e) {
-      return MOCK_STUDENTS.find(s => s.qr === qrValue) || null;
-    }
+async function lookupStudent(qrValue) {
+  try {
+    const res = await callServer("getStudentByQrCode", { qrText: qrValue });
+    return (res && res.found) ? res : null;
+  } catch (e) {
+    console.warn("Backend lookup failed, checking mock data:", e);
+    return MOCK_STUDENTS.find(s => s.qr === qrValue || s.id === qrValue) || null;
+  }
+}
+
+async function onScanSuccess(decodedText) {
+  if (scannerBusy) return;
+  scannerBusy = true;
+  if (html5QrCode) html5QrCode.pause();
+
+  const photo = document.getElementById("studentPhoto");
+  const nameEl = document.getElementById("studentName");
+  const metaEl = document.getElementById("studentMeta");
+
+  // Clean raw QR text if encoded as JSON
+  let cleanId = decodedText.trim();
+  try {
+    const parsed = JSON.parse(decodedText);
+    cleanId = parsed.studentID || parsed.id || cleanId;
+  } catch (e) {}
+
+  photo.src = ""; 
+  photo.classList.add("pending");
+  nameEl.textContent = "Looking up…"; 
+  metaEl.textContent = cleanId;
+  renderChecklist([{ label: "Matching student ID", pass: null }]);
+  
+  approveBtn.classList.remove("ready"); 
+  approveBtn.disabled = true; 
+  approveBtn.textContent = "Mark present";
+  openSheet();
+
+  const student = await lookupStudent(cleanId);
+  currentStudent = student;
+
+  if (!student) {
+    flash("rgba(226,96,79,0.5)");
+    nameEl.textContent = "Not recognized"; 
+    metaEl.textContent = cleanId;
+    renderChecklist([{ label: "No matching student record", pass: false }]);
+    return;
   }
 
-  async function onScanSuccess(decodedText) {
-    if (scannerBusy) return;
-    scannerBusy = true;
-    html5QrCode.pause();
+  // Display Name, ID, and Base64 Photo
+  const imgSrc = student.photo || student.pictureURL || "https://via.placeholder.com/150";
+  photo.src = imgSrc;
+  photo.classList.remove("pending");
+  
+  nameEl.textContent = student.name || student.fullName || "Unknown";
+  metaEl.textContent = `${student.id || student.studentID} · ${student.programme || 'Unassigned'}`;
 
-    const photo = document.getElementById("studentPhoto");
-    const nameEl = document.getElementById("studentName");
-    const metaEl = document.getElementById("studentMeta");
+  const enrolled = !SESSION.programme || (student.programme === SESSION.programme);
+  renderChecklist([
+    { label: "Student record found", pass: true },
+    { label: `Enrolled in ${SESSION.programme}`, pass: enrolled }
+  ]);
 
-    photo.src = ""; photo.classList.add("pending");
-    nameEl.textContent = "Looking up…"; metaEl.textContent = decodedText;
-    renderChecklist([{ label: "Matching student ID", pass: null }]);
-    approveBtn.classList.remove("ready"); approveBtn.disabled = true; approveBtn.textContent = "Mark present";
-    openSheet();
-
-    const student = await lookupStudent(decodedText);
-    currentStudent = student;
-
-    if (!student) {
-      flash("rgba(226,96,79,0.5)");
-      nameEl.textContent = "Not recognized"; metaEl.textContent = decodedText;
-      renderChecklist([{ label: "No matching student record", pass: false }]);
-      return;
-    }
-
-    photo.src = student.photo || student.pictureURL || "";
-    photo.classList.remove("pending");
-    nameEl.textContent = student.name || student.fullName;
-    metaEl.textContent = `${student.id || student.studentID} · ${student.programme}`;
-
-    const enrolled = (student.programme === SESSION.programme);
-    renderChecklist([
-      { label: "Student record found", pass: true },
-      { label: `Enrolled in ${SESSION.programme}`, pass: enrolled }
-    ]);
-
-    if (enrolled) {
-      flash("rgba(217,164,65,0.35)");
-      approveBtn.disabled = false; approveBtn.classList.add("ready");
-    } else {
-      flash("rgba(226,96,79,0.5)");
-      approveBtn.disabled = true;
-    }
+  if (enrolled) {
+    flash("rgba(217,164,65,0.35)");
+    approveBtn.disabled = false; 
+    approveBtn.classList.add("ready");
+  } else {
+    flash("rgba(226,96,79,0.5)");
+    approveBtn.disabled = true;
   }
-
+}
   async function startScanner() {
     html5QrCode = new Html5Qrcode("reader");
     try {
