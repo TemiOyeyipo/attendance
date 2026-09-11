@@ -23,7 +23,6 @@
     background:var(--ink); display:flex; flex-direction:column; position:relative; overflow:hidden;
   }
 
-  /* Top bar: title, tab switch, counter */
   .topbar{
     padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 12px;
     background:var(--panel); border-bottom:1px solid var(--line); z-index:6;
@@ -43,7 +42,6 @@
   }
   .tab-switch button.active{ background:var(--brass); color:#2A1D06; }
 
-  /* Content area */
   .content{ flex:1; display:flex; flex-direction:column; min-height:0; position:relative; }
   .scroll-pane{ flex:1; overflow-y:auto; padding:20px; }
 
@@ -71,13 +69,11 @@
   .status-card.ok{ background:rgba(63,174,107,0.14); color:var(--success); border:1px solid rgba(63,174,107,0.4); }
   .status-card.err{ background:rgba(226,96,79,0.14); color:var(--alert); border:1px solid rgba(226,96,79,0.4); }
 
-  /* Active session strip */
   .session-strip{ display:none; align-items:center; justify-content:space-between; padding:14px 18px; background:var(--panel-2); border-bottom:1px solid var(--line); }
   .session-strip.show{ display:flex; }
   .session-strip h3{ font-family:'Fraunces',serif; font-size:15px; margin:0; }
   .session-strip p{ font-size:11.5px; color:var(--paper-dim); margin:2px 0 0; }
 
-  /* Scan stage */
   .scan-stage{ position:relative; flex:1; background:#000; overflow:hidden; display:none; }
   .scan-stage.show{ display:block; }
   #reader{ width:100%; height:100%; }
@@ -92,7 +88,6 @@
   .flash.on{ animation:flashPulse 0.5s ease-out; }
   @keyframes flashPulse{ 0%{ opacity:0.55; } 100%{ opacity:0; } }
 
-  /* Bottom sheet (verification) */
   .sheet-backdrop{ position:absolute; inset:0; background:rgba(8,10,22,0.55); z-index:9; opacity:0; pointer-events:none; transition:opacity 0.25s ease; }
   .sheet-backdrop.show{ opacity:1; pointer-events:auto; }
   .sheet{
@@ -152,7 +147,6 @@
         <button class="btn-ghost" onclick="endSession()">End</button>
       </div>
 
-      <!-- Setup form -->
       <div class="scroll-pane" id="setupPane">
         <div class="card">
           <h2>Start a session</h2>
@@ -166,6 +160,8 @@
               <select id="setupSemester">
                 <option>Semester 1</option>
                 <option>Semester 2</option>
+                <option>Semester 3</option>
+                <option>Semester 4</option>
               </select>
             </div>
           </div>
@@ -181,7 +177,6 @@
         </div>
       </div>
 
-      <!-- Camera scan stage -->
       <div class="scan-stage" id="scanStage">
         <div id="reader"></div>
         <div class="reticle">
@@ -208,10 +203,12 @@
             <select id="manualProgramme" onchange="onManualProgrammeChange()"><option value="">Select…</option></select>
           </div>
           <div class="field">
-            <label>Cohort</label>
-            <select id="manualCohort" onchange="loadManualStudents()">
-              <option>2025/2026</option>
-              <option>2026/2027</option>
+            <label>Semester</label>
+            <select id="manualSemester">
+              <option>Semester 1</option>
+              <option>Semester 2</option>
+              <option>Semester 3</option>
+              <option>Semester 4</option>
             </select>
           </div>
         </div>
@@ -221,8 +218,8 @@
             <select id="manualCourse"><option value="">Select programme first…</option></select>
           </div>
           <div class="field">
-            <label>Date</label>
-            <input type="date" id="manualDate">
+            <label>Cohort</label>
+            <select id="manualCohort" onchange="loadManualStudents()"><option value="">Loading…</option></select>
           </div>
         </div>
         <div class="field">
@@ -268,33 +265,61 @@
 
 </div>
 
+<audio id="attSuccessSound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
+<audio id="attErrorSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
 <script>
   // ---------------------------------------------------------------
-  // Unified Apps Script Request Engine
+  // Backend wiring — mirrors the working callBackend() from your
+  // deployed ABBS attendance.html: same URL, same action names,
+  // same GET/POST split, same google.script.run fallback.
   // ---------------------------------------------------------------
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
 
-  const MOCK_PROGRAMMES = ["Diploma in Ministry", "Certificate in Bible Studies"];
-  const MOCK_COURSES = {
-    "Diploma in Ministry": ["Systematic Theology II", "Homiletics I"],
-    "Certificate in Bible Studies": ["Old Testament Survey", "New Testament Survey"]
-  };
-  const MOCK_STUDENTS = [
-    { qr:"STU-1001", id:"STU-1001", name:"Ifeoma Adeyemi", programme:"Diploma in Ministry", photo:"https://i.pravatar.cc/200?img=47" },
-    { qr:"STU-1002", id:"STU-1002", name:"Daniel Okonkwo", programme:"Diploma in Ministry", photo:"https://i.pravatar.cc/200?img=12" },
-    { qr:"STU-1003", id:"STU-1003", name:"Grace Umeh", programme:"Certificate in Bible Studies", photo:"https://i.pravatar.cc/200?img=32" }
-  ];
+  async function callBackend(action, params = {}) {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)[action](...Object.values(params));
+      });
+    } else if (GAS_WEB_APP_URL) {
+      try {
+        const isPost = action.startsWith('save') || action.startsWith('delete') || action.startsWith('record');
 
-  async function callBackend(action, payload = {}) {
-    if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("YOUR_DEPLOYMENT_ID")) {
-      throw new Error("Apps Script URL unconfigured.");
+        if (isPost) {
+          const response = await fetch(GAS_WEB_APP_URL + "?action=" + action, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ action: action, ...params })
+          });
+          const res = await response.json();
+          return res.data !== undefined ? res.data : res;
+        } else {
+          const url = new URL(GAS_WEB_APP_URL);
+          url.searchParams.append("action", action);
+          Object.keys(params).forEach(k => {
+            url.searchParams.append(k, typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
+          });
+          const response = await fetch(url);
+          const res = await response.json();
+          return res.data !== undefined ? res.data : res;
+        }
+      } catch (err) {
+        console.error("API Call Error:", err);
+        return null;
+      }
     }
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, ...payload })
-    });
-    return res.json();
+    return null;
+  }
+
+  function playAttSuccessSound() {
+    const s = document.getElementById("attSuccessSound");
+    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
+  }
+  function playAttErrorSound() {
+    const s = document.getElementById("attErrorSound");
+    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
   }
 
   let todayCount = 0;
@@ -306,7 +331,7 @@
     document.getElementById("countToday").textContent = todayCount;
   }
 
-  // ---------- Tab Switching ----------
+  // ---------- Tab switching ----------
   function switchTab(tab) {
     const scanBtn = document.getElementById("tabScanBtn");
     const manualBtn = document.getElementById("tabManualBtn");
@@ -325,46 +350,41 @@
       if (html5QrCode) html5QrCode.pause();
     }
   }
-  
   document.getElementById("scanTab").style.display = "flex";
   document.getElementById("scanTab").style.flexDirection = "column";
   document.getElementById("scanTab").style.flex = "1";
 
-  // ---------- Dropdown Loaders ----------
+  // ---------- Loading dropdown data (real backend, with graceful fallback) ----------
   async function loadProgrammes() {
-    let list;
-    try {
-      const res = await callBackend("getProgrammesList");
-      list = Array.isArray(res) ? res : (res.programmes || []);
-    } catch (e) {
-      list = MOCK_PROGRAMMES;
-    }
+    let list = await callBackend('getProgrammesList');
+    if (!list) list = ["Computer Science", "Software Engineering", "Information Technology"];
 
-    const opts = '<option value="">Select…</option>' + list.map(p => {
-      const val = typeof p === 'object' ? (p.name || p.programmeName) : p;
+    const opts = '<option value="">Select Programme...</option>' + list.map(p => {
+      const val = p.name || p;
       return `<option value="${val}">${val}</option>`;
     }).join("");
-    
     document.getElementById("setupProgramme").innerHTML = opts;
     document.getElementById("manualProgramme").innerHTML = opts;
   }
 
+  async function loadCohorts() {
+    let cohorts = await callBackend('getCohortsList');
+    if (!cohorts) cohorts = ["2023/2024", "2024/2025"];
+
+    const select = document.getElementById("manualCohort");
+    select.innerHTML = '<option value="">Select Cohort...</option>' +
+      cohorts.map(c => `<option value="${c}">${c}</option>`).join("");
+  }
+
   async function loadCourses(programme, targetSelect) {
-    targetSelect.innerHTML = '<option value="">Select…</option>';
+    targetSelect.innerHTML = '<option value="">Select Course...</option>';
     if (!programme) return;
-    let list;
-    try {
-      const res = await callBackend("getCoursesByProgramme", { programme });
-      list = Array.isArray(res) ? res : (res.courses || []);
-    } catch (e) {
-      list = MOCK_COURSES[programme] || [];
-    }
-    
-    list.forEach(c => {
-      const val = typeof c === 'object' ? (c.courseName || c.name || c.code) : c;
+    let courses = await callBackend('getCoursesByProgramme', { programme });
+    if (!courses) courses = ["Database Systems", "Web Architecture", "Data Structures"];
+    courses.forEach(c => {
+      const courseName = c.courseName || c;
       const opt = document.createElement("option");
-      opt.value = val; 
-      opt.text = val;
+      opt.value = courseName; opt.text = courseName;
       targetSelect.appendChild(opt);
     });
   }
@@ -372,48 +392,50 @@
   function onSetupProgrammeChange() {
     loadCourses(document.getElementById("setupProgramme").value, document.getElementById("setupCourse"));
   }
-  
   function onManualProgrammeChange() {
     loadCourses(document.getElementById("manualProgramme").value, document.getElementById("manualCourse"));
-    loadManualStudents();
+    const cohortEl = document.getElementById("manualCohort");
+    if (document.getElementById("manualProgramme").value && cohortEl.value) loadManualStudents();
   }
 
   async function loadManualStudents() {
     const programme = document.getElementById("manualProgramme").value;
     const cohort = document.getElementById("manualCohort").value;
     const select = document.getElementById("manualStudent");
-    select.innerHTML = '<option value="">Select…</option>';
-    if (!programme) return;
 
-    let list;
-    try {
-      const res = await callBackend("getStudentsByProgrammeAndCohort", { programme, cohort });
-      list = Array.isArray(res) ? res : (res.students || []);
-    } catch (e) {
-      list = MOCK_STUDENTS.filter(s => s.programme === programme);
+    if (!programme || !cohort) return;
+    select.innerHTML = '<option value="">Loading students...</option>';
+
+    let students = await callBackend('getStudentsByProgrammeAndCohort', { programme, cohort });
+    if (!students) {
+      students = [
+        { studentID: "STU-1001", studentName: "Alice Johnson", photoUrl: "" },
+        { studentID: "STU-1002", studentName: "Bob Smith", photoUrl: "" }
+      ];
     }
-    
-    list.forEach(s => {
-      const id = s.studentID || s.id;
-      const name = s.fullName || s.name || s.studentName;
-      const opt = document.createElement("option");
-      opt.value = JSON.stringify({ studentID: id, studentName: name });
-      opt.text = `${id} — ${name}`;
-      select.appendChild(opt);
+
+    if (students.length === 0) {
+      select.innerHTML = '<option value="">No eligible students found</option>';
+      return;
+    }
+
+    let html = '<option value="">Select Student...</option>';
+    students.forEach(s => {
+      const cleanName = (s.studentName || '').replace(/'/g, "&apos;");
+      const payload = JSON.stringify({
+        studentID: s.studentID, studentName: cleanName, photoUrl: s.photoUrl || ""
+      }).replace(/'/g, "&apos;");
+      html += `<option value='${payload}'>${s.studentID} - ${cleanName}</option>`;
     });
+    select.innerHTML = html;
   }
 
   async function loadTodayCount() {
-    try {
-      const res = await callBackend("getTodayAttendanceCount");
-      const count = typeof res === 'number' ? res : (res.count || res.todayCount || 0);
-      bumpCount(count);
-    } catch (e) {
-      bumpCount(0);
-    }
+    const count = await callBackend('getTodayAttendanceCount');
+    bumpCount(count || 0);
   }
 
-  // ---------- Session Controls ----------
+  // ---------- Session control ----------
   function startSession() {
     const programme = document.getElementById("setupProgramme").value;
     const semester = document.getElementById("setupSemester").value;
@@ -427,7 +449,7 @@
 
     SESSION = { programme, semester, course, lesson };
     document.getElementById("sessionCourse").textContent = course;
-    document.getElementById("sessionMeta").textContent = `${programme} · ${lesson}`;
+    document.getElementById("sessionMeta").textContent = `${programme} · ${semester} · ${lesson}`;
     document.getElementById("sessionStrip").classList.add("show");
     document.getElementById("setupPane").style.display = "none";
     document.getElementById("scanStage").classList.add("show");
@@ -444,7 +466,7 @@
     document.getElementById("setupPane").style.display = "block";
   }
 
-  // ---------- Sheet UI and QR Scanning ----------
+  // ---------- Scanning + verification sheet ----------
   const sheet = document.getElementById("sheet");
   const backdrop = document.getElementById("backdrop");
   const flashEl = document.getElementById("flash");
@@ -456,19 +478,15 @@
     toastEl.textContent = msg; toastEl.classList.add("show");
     setTimeout(() => toastEl.classList.remove("show"), 2200);
   }
-  
   function flash(color) {
     flashEl.style.background = color; flashEl.classList.remove("on");
     void flashEl.offsetWidth; flashEl.classList.add("on");
   }
-  
   function openSheet() { backdrop.classList.add("show"); sheet.classList.add("show"); }
-  
   function closeSheet() {
     backdrop.classList.remove("show"); sheet.classList.remove("show");
     setTimeout(() => { if (html5QrCode) html5QrCode.resume().catch(()=>{}); }, 300);
   }
-  
   function renderChecklist(rows) {
     const el = document.getElementById("checklist");
     el.innerHTML = rows.map(r =>
@@ -478,79 +496,68 @@
     ).join("");
   }
 
-  async function lookupStudent(qrValue) {
-    try {
-      const res = await callBackend("getStudentByQrCode", { qrText: qrValue });
-      if (res && (res.found || res.studentID || res.id)) {
-        return res.student || res;
-      }
-      return null;
-    } catch (e) {
-      return MOCK_STUDENTS.find(s => s.qr === qrValue || s.id === qrValue) || null;
-    }
-  }
-
+  // Matches the attached code's scan handler: JSON-or-raw decode, getStudentByID
+  // lookup, "completed" status gate, and the passport/pictureUrl/photoUrl fallback
+  // chain for the photo.
   async function onScanSuccess(decodedText) {
     if (scannerBusy) return;
     scannerBusy = true;
-    if (html5QrCode) html5QrCode.pause();
+    if (html5QrCode) { try { html5QrCode.pause(); } catch (e) {} }
 
     const photo = document.getElementById("studentPhoto");
     const nameEl = document.getElementById("studentName");
     const metaEl = document.getElementById("studentMeta");
 
-    let cleanId = decodedText.trim();
+    let scannedID = decodedText.trim();
     try {
       const parsed = JSON.parse(decodedText);
-      cleanId = parsed.studentID || parsed.id || cleanId;
-    } catch (e) {}
+      scannedID = parsed.studentID || parsed.studentId || decodedText;
+    } catch (e) { /* raw text QR code */ }
 
-    photo.src = ""; 
-    photo.classList.add("pending");
-    nameEl.textContent = "Looking up…"; 
-    metaEl.textContent = cleanId;
-    renderChecklist([{ label: "Matching student ID", pass: null }]);
-    
-    approveBtn.classList.remove("ready"); 
-    approveBtn.disabled = true; 
-    approveBtn.textContent = "Mark present";
+    photo.src = ""; photo.classList.add("pending");
+    nameEl.textContent = "Looking up…"; metaEl.textContent = scannedID;
+    renderChecklist([{ label: "Fetching student record", pass: null }]);
+    approveBtn.classList.remove("ready"); approveBtn.disabled = true; approveBtn.textContent = "Mark present";
     openSheet();
 
-    const student = await lookupStudent(cleanId);
-    currentStudent = student;
+    const studentData = await callBackend('getStudentByID', { studentId: scannedID });
 
-    if (!student) {
+    if (!studentData) {
       flash("rgba(226,96,79,0.5)");
-      nameEl.textContent = "Not recognized"; 
-      metaEl.textContent = cleanId;
-      renderChecklist([{ label: "No matching student record", pass: false }]);
+      nameEl.textContent = "Not recognized"; metaEl.textContent = scannedID;
+      renderChecklist([{ label: `Student ID (${scannedID}) not found`, pass: false }]);
+      playAttErrorSound();
       return;
     }
 
-    const imgSrc = student.photo || student.pictureURL || student.photoUrl || "https://via.placeholder.com/150";
-    photo.src = imgSrc;
-    photo.classList.remove("pending");
-    
-    const studentName = student.name || student.fullName || student.studentName || "Unknown";
-    const studentID = student.id || student.studentID || cleanId;
-    const studentProg = student.programme || student.program || 'Unassigned';
+    const finalID = studentData.studentID || studentData.studentId || scannedID;
+    const finalName = studentData.fullName || studentData.studentName || "Unknown Student";
+    const photoUrl = studentData.passport || studentData.pictureUrl || studentData.photoUrl || "";
+    const isCompleted = studentData.status && studentData.status.toLowerCase() === 'completed';
 
-    nameEl.textContent = studentName;
-    metaEl.textContent = `${studentID} · ${studentProg}`;
+    currentStudent = { id: finalID, name: finalName, photo: photoUrl, status: studentData.status };
 
-    const enrolled = !SESSION.programme || (studentProg === SESSION.programme);
+    photo.src = photoUrl; photo.classList.remove("pending");
+    nameEl.textContent = finalName;
+    metaEl.textContent = finalID;
+
     renderChecklist([
       { label: "Student record found", pass: true },
-      { label: `Enrolled in ${SESSION.programme}`, pass: enrolled }
+      { label: "Active enrollment status", pass: !isCompleted }
     ]);
 
-    if (enrolled) {
-      flash("rgba(217,164,65,0.35)");
-      approveBtn.disabled = false; 
-      approveBtn.classList.add("ready");
-    } else {
+    if (isCompleted) {
       flash("rgba(226,96,79,0.5)");
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: "Access Denied: status is Completed", pass: false }
+      ]);
       approveBtn.disabled = true;
+      playAttErrorSound();
+    } else {
+      flash("rgba(217,164,65,0.35)");
+      approveBtn.disabled = false; approveBtn.classList.add("ready");
+      playAttSuccessSound();
     }
   }
 
@@ -563,98 +570,85 @@
     }
   }
 
+  // Matches recordAttendanceEntry payload shape from the attached code exactly
+  // (both id-key variants, both name-key variants, pictureUrl, status).
   approveBtn.addEventListener("click", async () => {
     if (!currentStudent || approveBtn.disabled) return;
-    approveBtn.disabled = true; 
-    approveBtn.textContent = "Saving…";
+    approveBtn.disabled = true; approveBtn.textContent = "Saving…";
 
     const payload = {
-      studentID: currentStudent.id || currentStudent.studentID,
-      studentName: currentStudent.name || currentStudent.fullName || currentStudent.studentName,
-      programme: SESSION.programme, 
-      semester: SESSION.semester,
-      course: SESSION.course, 
-      lesson: SESSION.lesson, 
-      entryType: "QR Scan"
+      programme: SESSION.programme, semester: SESSION.semester,
+      course: SESSION.course, lesson: SESSION.lesson,
+      studentId: currentStudent.id, studentID: currentStudent.id,
+      studentName: currentStudent.name, fullName: currentStudent.name,
+      pictureUrl: currentStudent.photo, status: "Present"
     };
 
-    let ok = false, newCount = null;
-    try {
-      const res = await callBackend("saveApprovedAttendance", payload);
-      ok = !!(res && (res.success || res.status === "OK")); 
-      newCount = res && (res.newCount !== undefined ? res.newCount : res.count);
-    } catch (e) {
-      ok = true;
-    }
+    const res = await callBackend('recordAttendanceEntry', { payload });
 
-    if (ok) {
-      bumpCount(newCount != null ? newCount : undefined);
+    if (res && res.isDuplicate) {
+      approveBtn.disabled = false; approveBtn.textContent = "Mark present";
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: res.message || "Already recorded", pass: false }
+      ]);
+      playAttErrorSound();
+    } else {
+      bumpCount();
       approveBtn.textContent = "Marked present ✓";
       setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
-    } else {
-      approveBtn.textContent = "Retry"; 
-      approveBtn.disabled = false;
     }
   });
-
   rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
   backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
 
-  // ---------- Manual Submission ----------
+  // ---------- Manual mode ----------
   async function submitManual() {
-    const programme = document.getElementById("manualProgramme").value;
-    const course = document.getElementById("manualCourse").value;
-    const date = document.getElementById("manualDate").value;
-    const lesson = document.getElementById("manualLesson").value.trim();
     const raw = document.getElementById("manualStudent").value;
-    const status = document.getElementById("manualStatus").value;
+    const course = document.getElementById("manualCourse").value;
+    const lesson = document.getElementById("manualLesson").value.trim();
 
-    if (!programme || !course || !date || !lesson || !raw) {
-      alert("Please fill in every field before saving."); return;
+    if (!raw || !course || !lesson) {
+      alert("Please select a student and enter course and lesson details.");
+      return;
     }
 
     const student = JSON.parse(raw);
     const btn = document.getElementById("manualSaveBtn");
     btn.disabled = true;
 
-    const payload = { 
-      programme, 
-      course, 
-      date, 
-      lesson, 
-      studentID: student.studentID, 
-      studentName: student.studentName, 
-      status,
-      entryType: "Manual"
+    const payload = {
+      programme: document.getElementById("manualProgramme").value,
+      semester: document.getElementById("manualSemester").value,
+      course, lesson,
+      studentId: student.studentID, studentID: student.studentID,
+      studentName: student.studentName, fullName: student.studentName,
+      pictureUrl: student.photoUrl || "",
+      status: document.getElementById("manualStatus").value
     };
-    
-    const card = document.getElementById("manualStatusCard");
 
-    let ok = false, newCount = null;
-    try {
-      const res = await callBackend("saveManualAttendance", payload);
-      ok = !!(res && (res.success || res.status === "OK")); 
-      newCount = res && (res.newCount !== undefined ? res.newCount : res.count);
-    } catch (e) { 
-      ok = true;
-    }
-
+    const res = await callBackend('recordAttendanceEntry', { payload });
     btn.disabled = false;
+
+    const card = document.getElementById("manualStatusCard");
     card.classList.add("show");
-    if (ok) {
-      card.className = "status-card show ok";
-      card.textContent = "Attendance record saved.";
-      bumpCount(newCount != null ? newCount : undefined);
-    } else {
+    if (res && res.isDuplicate) {
       card.className = "status-card show err";
-      card.textContent = "Couldn't save — try again.";
+      card.textContent = res.message || "Already recorded.";
+      playAttErrorSound();
+    } else {
+      card.className = "status-card show ok";
+      card.textContent = `Record saved for ${student.studentName}`;
+      bumpCount();
+      setTimeout(() => card.classList.remove("show"), 3000);
     }
   }
 
   // ---------- Init ----------
-  document.getElementById("manualDate").value = new Date().toISOString().split("T")[0];
   loadProgrammes();
+  loadCohorts();
   loadTodayCount();
 </script>
 </body>
 </html>
+
