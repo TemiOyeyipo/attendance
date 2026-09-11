@@ -1,745 +1,209 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Attendance Portal</title>
-  
-  <!-- FontAwesome Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- HTML5 QR Code Library -->
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+<style>
+  .attendance-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
 
-  <style>
-    :root {
-      --bg-main: #0F172A;
-      --bg-card: #1E293B;
-      --bg-hover: #334155;
-      --border-color: #334155;
-      --accent: #3B82F6;
-      --accent-hover: #2563EB;
-      --text-muted: #94A3B8;
-      --danger: #EF4444;
-      --success: #10B981;
-      --radius: 8px;
-    }
+  /* Expanded Camera Viewport */
+  #qr-reader {
+    width: 100%;
+    min-height: 380px;
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+  }
 
-    body {
-      background-color: var(--bg-main);
-      color: #FFFFFF;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0;
-      padding: 20px;
-    }
+  #qr-reader video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
 
-    .att-card-container {
-      background: var(--bg-card, #1E293B);
-      border: 1px solid var(--border-color, #334155);
-      border-radius: var(--radius, 8px);
-      padding: 20px;
-      max-width: 800px;
-      margin: 0 auto;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-    }
+  .verification-card {
+    display: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+  }
 
-    .att-tab-bar {
-      display: flex;
-      gap: 10px;
-      border-bottom: 1px solid var(--border-color, #334155);
-      padding-bottom: 14px;
-      margin-bottom: 16px;
-    }
+  .student-photo {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 12px auto;
+    border: 3px solid var(--accent);
+  }
 
-    .att-tab-btn {
-      flex: 1;
-      padding: 10px 16px;
-      background: var(--bg-main, #0F172A);
-      color: var(--text-muted, #94A3B8);
-      border: 1px solid var(--border-color, #334155);
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: all 0.2s ease;
-    }
+  .actions-group {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+  }
 
-    .att-tab-btn.active {
-      background: var(--accent, #3B82F6);
-      color: #FFFFFF;
-      border-color: var(--accent, #3B82F6);
-    }
+  .btn {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #fff;
+  }
 
-    .att-header-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      gap: 10px;
-    }
+  .btn-approve { background: #10B981; }
+  .btn-reject { background: #EF4444; }
+  .btn-reset { background: var(--bg-hover); margin-top: 12px; width: 100%; }
+</style>
 
-    .att-header-bar h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
-      color: #FFFFFF;
-    }
+<div class="attendance-container">
+  <div id="qr-reader"></div>
 
-    .btn-accent-att {
-      padding: 10px 16px;
-      background: var(--accent, #3B82F6);
-      color: #FFFFFF;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      cursor: pointer;
-      width: 100%;
-      margin-top: 14px;
-      transition: background 0.2s ease;
-    }
+  <!-- Student Verification Overlay -->
+  <div id="verification-card" class="verification-card">
+    <h3 style="color: var(--text-muted); font-size: 14px;">STUDENT VERIFICATION</h3>
+    <img id="student-img" class="student-photo" src="" alt="Student Profile">
+    <h2 id="student-name" style="margin-top: 8px;">---</h2>
+    <p id="student-id-display" style="color: var(--text-muted); margin-top: 4px;">ID: ---</p>
+    <p id="student-programme" style="color: var(--accent); font-size: 14px; margin-top: 2px;">---</p>
 
-    .btn-accent-att:hover { background: var(--accent-hover, #2563EB); }
-    .btn-accent-att:disabled { opacity: 0.6; cursor: not-allowed; }
+    <div class="actions-group">
+      <button class="btn btn-reject" onclick="rejectStudent()">Reject</button>
+      <button class="btn btn-approve" onclick="approveAttendance()">Approve & Mark</button>
+    </div>
+  </div>
+</div>
 
-    .btn-sec-att {
-      padding: 8px 14px;
-      background: var(--bg-hover, #334155);
-      color: #FFFFFF;
-      border: 1px solid var(--border-color, #334155);
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-    }
+<!-- Include Html5Qrcode Library -->
+<script src="https://unpkg.com/html5-qrcode"></script>
 
-    .btn-approve-att { background: var(--success, #10B981); color: #FFFFFF; display: none; }
-    .btn-approve-att:hover { background: #059669; }
+<script>
+  let activeStudentData = null;
+  let audioContext = null;
 
-    .form-group-att {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 14px;
-    }
-
-    .form-group-att label { font-size: 12px; color: var(--text-muted, #94A3B8); font-weight: 500; }
-
-    .ctrl-att {
-      width: 100%;
-      padding: 10px 12px;
-      background: var(--bg-main, #0F172A);
-      border: 1px solid var(--border-color, #334155);
-      color: #FFFFFF;
-      border-radius: 6px;
-      font-size: 13px;
-      outline: none;
-      box-sizing: border-box;
-    }
-
-    .ctrl-att:focus { border-color: var(--accent, #3B82F6); }
-
-    #reader {
-      width: 100%;
-      border-radius: 6px;
-      overflow: hidden;
-      background: #000000;
-      margin-top: 10px;
-    }
-
-    .student-card-box {
-      background: var(--bg-main, #0F172A);
-      border: 1px solid var(--border-color, #334155);
-      border-radius: 6px;
-      padding: 20px;
-      text-align: center;
-      margin-top: 16px;
-    }
-
-    .student-photo-img {
-      width: 130px;
-      height: 130px;
-      border-radius: 50%;
-      object-fit: cover;
-      border: 4px solid var(--accent, #3B82F6);
-      margin: 0 auto 12px auto;
-      display: block;
-      background: var(--bg-card, #1E293B);
-    }
-
-    .student-name-txt { font-size: 20px; font-weight: 700; color: #FFFFFF; }
-    .student-id-txt { font-size: 13px; color: var(--accent, #3B82F6); font-weight: 600; margin-top: 2px; }
-
-    .status-badge-box {
-      margin-top: 14px;
-      padding: 10px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    .status-idle { background: var(--bg-main, #0F172A); color: var(--text-muted, #94A3B8); border: 1px dashed var(--border-color, #334155); }
-    .status-success { background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid #10B981; }
-    .status-error { background: rgba(239, 68, 68, 0.15); color: #EF4444; border: 1px solid #EF4444; }
-
-    .counter-box-att {
-      background: var(--bg-main, #0F172A);
-      border: 1px solid var(--border-color, #334155);
-      border-radius: 6px;
-      padding: 16px;
-      text-align: center;
-      margin-top: 16px;
-    }
-
-    .counter-num-txt { font-size: 36px; font-weight: 800; color: var(--success, #10B981); margin-top: 4px; }
-  </style>
-</head>
-<body>
-
-  <div id="main-content"></div>
-
-  <script>
-    // OPTIONAL: Replace this URL with your published Google Apps Script Web App URL
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec"; 
-
-    window.html5QrcodeScanner = window.html5QrcodeScanner || null;
-    window.currentStudentAttendance = window.currentStudentAttendance || null;
-
-    // Helper to call backend or fallback to demo data
-async function callBackend(action, params = {}) {
-  if (typeof google !== 'undefined' && google.script && google.script.run) {
-    return new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(reject)[action](...Object.values(params));
-    });
-  } else if (GAS_WEB_APP_URL) {
+  // Single Beep Generator
+  function playBeep() {
     try {
-      // POST strategy for data persistence
-      const isPost = action.startsWith('save') || action.startsWith('delete') || action.startsWith('record');
-      
-      if (isPost) {
-        const response = await fetch(GAS_WEB_APP_URL + "?action=" + action, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: action, ...params })
-        });
-        const res = await response.json();
-        return res.data !== undefined ? res.data : res;
-      } else {
-        // GET strategy for queries
-        const url = new URL(GAS_WEB_APP_URL);
-        url.searchParams.append("action", action);
-        Object.keys(params).forEach(k => {
-          url.searchParams.append(k, typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
-        });
-        const response = await fetch(url);
-        const res = await response.json();
-        return res.data !== undefined ? res.data : res;
-      }
-    } catch (err) {
-      console.error("API Call Error:", err);
-      return null;
+      if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.type = "sine";
+      osc.frequency.value = 800;
+      gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.15);
+    } catch(e) { console.warn("Audio unavailable", e); }
+  }
+
+  function renderAttendanceView() {
+    const readerElem = document.getElementById('qr-reader');
+    if (!readerElem) return;
+
+    if (window.html5QrcodeScanner) {
+      try { window.html5QrcodeScanner.clear(); } catch(e){}
+    }
+
+    window.html5QrcodeScanner = new Html5QrcodeScanner(
+      "qr-reader", 
+      { 
+        fps: 10, 
+        qrbox: { width: 280, height: 280 },
+        aspectRatio: 1.0
+      }, 
+      /* verbose= */ false
+    );
+
+    window.html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+  }
+
+  function onScanSuccess(decodedText) {
+    playBeep();
+
+    // 1. Pause scanner to stop endless loop & continuous beeping
+    if (window.html5QrcodeScanner) {
+      window.html5QrcodeScanner.pause(true);
+    }
+
+    // 2. Fetch student details from Google Sheets backend or local state
+    fetchStudentDetails(decodedText);
+  }
+
+  function onScanFailure(error) {
+    // Ignore frame read failures
+  }
+
+  function fetchStudentDetails(scannedID) {
+    // Call Google Apps Script server function
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(displayVerificationCard)
+        .withFailureHandler(handleFetchError)
+        .getStudentByID(scannedID);
+    } else {
+      // Demo Fallback for local testing
+      displayVerificationCard({
+        studentID: scannedID,
+        fullName: "Sample Student",
+        programme: "Computer Science",
+        photoUrl: "https://via.placeholder.com/150"
+      });
     }
   }
-  return null;
-}
 
-    window.renderAttendanceView = function() {
-      const mainContent = document.getElementById('main-content');
-      if (!mainContent) return;
-
-      mainContent.innerHTML = `
-        <div class="att-card-container">
-          <!-- MODE SWITCH TABS -->
-          <div class="att-tab-bar">
-            <button id="att-tab-qr-btn" class="att-tab-btn active" onclick="switchAttendanceMode('qr')">
-              <i class="fa-solid fa-qrcode"></i> QR Scan Mode
-            </button>
-            <button id="att-tab-manual-btn" class="att-tab-btn" onclick="switchAttendanceMode('manual')">
-              <i class="fa-solid fa-pen-to-square"></i> Manual Input Mode
-            </button>
-          </div>
-
-          <!-- TAB 1: QR SCANNER SECTION -->
-          <div id="att-qr-view">
-            <div id="att-setup-section">
-              <div class="att-header-bar">
-                <h3><i class="fa-solid fa-qrcode" style="color: var(--accent, #3B82F6);"></i> Attendance Portal Setup</h3>
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div class="form-group-att">
-                  <label>Programme</label>
-                  <select id="att-programme" class="ctrl-att" onchange="loadAttendanceCourses('qr')">
-                    <option value="">Select Programme...</option>
-                  </select>
-                </div>
-                <div class="form-group-att">
-                  <label>Semester</label>
-                  <select id="att-semester" class="ctrl-att">
-                    <option value="Semester 1">Semester 1</option>
-                    <option value="Semester 2">Semester 2</option>
-                    <option value="Semester 3">Semester 3</option>
-                    <option value="Semester 4">Semester 4</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group-att">
-                <label>Course</label>
-                <select id="att-course" class="ctrl-att">
-                  <option value="">Select Programme First...</option>
-                </select>
-              </div>
-              <div class="form-group-att">
-                <label>Lesson / Topic</label>
-                <input type="text" id="att-lesson" class="ctrl-att" placeholder="e.g. Lesson 5 - Database Normalization">
-              </div>
-              <button id="att-start-btn" class="btn-accent-att" onclick="startAttendanceSession()">
-                <i class="fa-solid fa-play"></i> START ATTENDANCE SESSION
-              </button>
-            </div>
-
-            <div id="att-active-header" class="att-header-bar" style="display: none; background: var(--bg-main, #0F172A); padding: 12px; border-radius: 6px; border-left: 4px solid var(--accent, #3B82F6);">
-              <div>
-                <h4 id="att-session-title" style="margin: 0; color: #FFF; font-size: 15px;">Course Name</h4>
-                <div id="att-session-sub" style="font-size: 12px; color: var(--text-muted, #94A3B8); margin-top: 2px;">Programme • Semester • Lesson</div>
-              </div>
-              <button class="btn-sec-att" onclick="endAttendanceSession()">
-                <i class="fa-solid fa-stop"></i> End Session
-              </button>
-            </div>
-
-            <div id="att-scanning-section" style="display: none; flex-direction: column; gap: 16px; margin-top: 16px;">
-              <div>
-                <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #FFF;">Camera Viewfinder</h4>
-                <div id="reader"></div>
-              </div>
-              <div class="student-card-box">
-                <img id="att-photo" class="student-photo-img" src="https://via.placeholder.com/130" alt="Student Photo">
-                <div id="att-student-name" class="student-name-txt">Waiting for Scan...</div>
-                <div id="att-student-id" class="student-id-txt">-</div>
-                <div id="att-status-card" class="status-badge-box status-idle">Ready to scan student ID QR code</div>
-                <button id="att-approve-btn" class="btn-accent-att btn-approve-att" onclick="approveAttendanceRecord()">
-                  <i class="fa-solid fa-check-circle"></i> APPROVE ATTENDANCE
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- TAB 2: MANUAL INPUT -->
-          <div id="att-manual-view" style="display: none;">
-            <div class="att-header-bar">
-              <h3><i class="fa-solid fa-pen-to-square" style="color: var(--accent, #3B82F6);"></i> Manual Attendance Input</h3>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <div class="form-group-att">
-                <label>Programme</label>
-                <select id="att-manual-programme" class="ctrl-att" onchange="onManualProgrammeChange()">
-                  <option value="">Select Programme...</option>
-                </select>
-              </div>
-              <div class="form-group-att">
-                <label>Semester</label>
-                <select id="att-manual-semester" class="ctrl-att">
-                  <option value="Semester 1">Semester 1</option>
-                  <option value="Semester 2">Semester 2</option>
-                  <option value="Semester 3">Semester 3</option>
-                  <option value="Semester 4">Semester 4</option>
-                </select>
-              </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <div class="form-group-att">
-                <label>Course</label>
-                <select id="att-manual-course" class="ctrl-att">
-                  <option value="">Select Programme First...</option>
-                </select>
-              </div>
-              <div class="form-group-att">
-                <label>Cohort / Academic Session</label>
-                <select id="att-manual-cohort" class="ctrl-att" onchange="loadStudentsForManualMarking()">
-                  <option value="">Loading Cohorts...</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group-att">
-              <label>Lesson / Topic Title</label>
-              <input type="text" id="att-manual-topic" class="ctrl-att" placeholder="e.g. Lesson 4 - System Architecture">
-            </div>
-            <div class="form-group-att">
-              <label>Select Student</label>
-              <select id="att-manual-student" class="ctrl-att">
-                <option value="">Select Programme & Cohort First...</option>
-              </select>
-            </div>
-            <div class="form-group-att">
-              <label>Attendance Status</label>
-              <select id="att-manual-status" class="ctrl-att">
-                <option value="Present">Present</option>
-                <option value="Late">Late</option>
-                <option value="Excused">Excused</option>
-                <option value="Absent">Absent</option>
-              </select>
-            </div>
-            <button id="att-manual-submit-btn" class="btn-accent-att" onclick="submitManualAttendance()">
-              <i class="fa-solid fa-check"></i> SAVE MANUAL RECORD
-            </button>
-            <div id="att-manual-status-card" class="status-badge-box status-idle" style="display: none; margin-top: 14px;"></div>
-          </div>
-
-          <!-- COUNTER -->
-          <div class="counter-box-att">
-            <span style="font-size: 11px; color: var(--text-muted, #94A3B8); font-weight: 700; letter-spacing: 0.5px;">TODAY'S TOTAL RECORDED ATTENDANCE</span>
-            <div id="att-today-count" class="counter-num-txt">0</div>
-          </div>
-        </div>
-
-        <!-- AUDIO FEEDBACK -->
-        <audio id="attSuccessSound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
-        <audio id="attErrorSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
-      `;
-
-      loadAttendanceProgrammes();
-      loadAttendanceCohorts();
-      loadTodayAttendanceCount();
-    };
-
-    window.switchAttendanceMode = function(mode) {
-      const qrView = document.getElementById("att-qr-view");
-      const manualView = document.getElementById("att-manual-view");
-      const qrBtn = document.getElementById("att-tab-qr-btn");
-      const manualBtn = document.getElementById("att-tab-manual-btn");
-
-      if (!qrView || !manualView) return;
-
-      if (mode === 'qr') {
-        qrView.style.display = "block";
-        manualView.style.display = "none";
-        if (qrBtn) qrBtn.classList.add("active");
-        if (manualBtn) manualBtn.classList.remove("active");
-      } else {
-        qrView.style.display = "none";
-        manualView.style.display = "block";
-        if (manualBtn) manualBtn.classList.add("active");
-        if (qrBtn) qrBtn.classList.remove("active");
-
-        if (window.html5QrcodeScanner) {
-          window.html5QrcodeScanner.clear().catch(err => console.error(err));
-          window.html5QrcodeScanner = null;
-        }
-      }
-    };
-
-    window.playAttSuccessSound = function() {
-      const sound = document.getElementById("attSuccessSound");
-      if (sound) { sound.currentTime = 0; sound.play().catch(() => {}); }
-    };
-
-    window.playAttErrorSound = function() {
-      const sound = document.getElementById("attErrorSound");
-      if (sound) { sound.currentTime = 0; sound.play().catch(() => {}); }
-    };
-
-    window.loadAttendanceProgrammes = async function() {
-      let data = await callBackend('getProgrammesList');
-      if (!data) data = ["Computer Science", "Software Engineering", "Information Technology"];
-
-      const qrSelect = document.getElementById("att-programme");
-      const manualSelect = document.getElementById("att-manual-programme");
-      
-      let optionsHtml = '<option value="">Select Programme...</option>';
-      (data || []).forEach(item => {
-        const val = item.name || item;
-        optionsHtml += `<option value="${val}">${val}</option>`;
-      });
-
-      if (qrSelect) qrSelect.innerHTML = optionsHtml;
-      if (manualSelect) manualSelect.innerHTML = optionsHtml;
-    };
-
-    window.loadAttendanceCohorts = async function() {
-      let cohorts = await callBackend('getCohortsList');
-      if (!cohorts) cohorts = ["2023/2024", "2024/2025"];
-
-      const cohortSelect = document.getElementById("att-manual-cohort");
-      if (!cohortSelect) return;
-
-      let optionsHtml = '<option value="">Select Cohort...</option>';
-      (cohorts || []).forEach(coh => {
-        optionsHtml += `<option value="${coh}">${coh}</option>`;
-      });
-
-      cohortSelect.innerHTML = optionsHtml;
-    };
-
-    window.onManualProgrammeChange = function() {
-      const progEl = document.getElementById("att-manual-programme");
-      const studentSelect = document.getElementById("att-manual-student");
-
-      loadAttendanceCourses('manual');
-
-      if (!progEl || !progEl.value) {
-        if (studentSelect) studentSelect.innerHTML = '<option value="">Select Programme First...</option>';
-        return;
-      }
-
-      loadStudentsForManualMarking();
-    };
-
-    window.loadAttendanceCourses = async function(mode = 'qr') {
-      const isManual = mode === 'manual';
-      const progSelect = document.getElementById(isManual ? "att-manual-programme" : "att-programme");
-      const courseSelect = document.getElementById(isManual ? "att-manual-course" : "att-course");
-
-      if (!progSelect || !courseSelect) return;
-      const programme = progSelect.value;
-
-      courseSelect.innerHTML = '<option value="">Select Course...</option>';
-      if (!programme) return;
-
-      let courses = await callBackend('getCoursesByProgramme', { programme });
-      if (!courses) courses = ["Database Systems", "Web Architecture", "Data Structures"];
-
-      (courses || []).forEach(c => {
-        const courseName = c.courseName || c;
-        const opt = document.createElement("option");
-        opt.value = courseName;
-        opt.text = courseName;
-        courseSelect.appendChild(opt);
-      });
-    };
-
-    window.loadStudentsForManualMarking = async function() {
-      const progEl = document.getElementById("att-manual-programme");
-      const cohortEl = document.getElementById("att-manual-cohort");
-      const studentSelect = document.getElementById("att-manual-student");
-
-      if (!studentSelect || !progEl || !cohortEl) return;
-      const programme = progEl.value;
-      const cohort = cohortEl.value;
-
-      if (!programme || !cohort) return;
-
-      studentSelect.innerHTML = '<option value="">Loading students...</option>';
-
-      let students = await callBackend('getStudentsByProgrammeAndCohort', { programme, cohort });
-      if (!students) {
-        students = [
-          { studentID: "STU-1001", studentName: "Alice Johnson", photoUrl: "" },
-          { studentID: "STU-1002", studentName: "Bob Smith", photoUrl: "" }
-        ];
-      }
-
-      if (students.length === 0) {
-        studentSelect.innerHTML = '<option value="">No eligible students found</option>';
-        return;
-      }
-
-      let html = '<option value="">Select Student...</option>';
-      students.forEach(s => {
-        const cleanName = (s.studentName || '').replace(/'/g, "&apos;");
-        const payload = JSON.stringify({
-          studentID: s.studentID,
-          studentName: cleanName,
-          photoUrl: s.photoUrl || ""
-        }).replace(/'/g, "&apos;");
-
-        html += `<option value='${payload}'>${s.studentID} - ${cleanName}</option>`;
-      });
-
-      studentSelect.innerHTML = html;
-    };
-
-    window.loadTodayAttendanceCount = async function() {
-      let count = await callBackend('getTodayAttendanceCount');
-      const counterEl = document.getElementById("att-today-count");
-      if (counterEl) counterEl.innerText = count || 0;
-    };
-
-    window.startAttendanceSession = function() {
-      const prog = document.getElementById("att-programme").value;
-      const sem = document.getElementById("att-semester").value;
-      const course = document.getElementById("att-course").value;
-      const lesson = document.getElementById("att-lesson").value.trim();
-
-      if (!prog || !course || !lesson) {
-        alert("Please complete Programme, Course, and Lesson details.");
-        return;
-      }
-
-      document.getElementById("att-session-title").innerText = course;
-      document.getElementById("att-session-sub").innerText = `${prog} • ${sem} • ${lesson}`;
-      document.getElementById("att-setup-section").style.display = "none";
-      document.getElementById("att-active-header").style.display = "flex";
-      document.getElementById("att-scanning-section").style.display = "flex";
-
-      startScannerEngine();
-    };
-
-    window.endAttendanceSession = function() {
-      if (confirm("Are you sure you want to end this attendance session?")) {
-        if (window.html5QrcodeScanner) {
-          window.html5QrcodeScanner.clear().catch(err => console.error("Scanner clear error:", err));
-          window.html5QrcodeScanner = null;
-        }
-
-        document.getElementById("att-setup-section").style.display = "block";
-        document.getElementById("att-active-header").style.display = "none";
-        document.getElementById("att-scanning-section").style.display = "none";
-        resetScannedStudentCard();
-      }
-    };
-
-    window.startScannerEngine = function() {
-      if (typeof Html5QrcodeScanner !== 'undefined') {
-        window.html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 220, height: 220 } }, false);
-        window.html5QrcodeScanner.render(onAttendanceScanSuccess, onAttendanceScanFailure);
-      }
-    };
-
-    window.onAttendanceScanSuccess = function(decodedText) {
-      try {
-        const data = JSON.parse(decodedText);
-        
-        if (data.status && data.status.toLowerCase() === 'completed') {
-          const card = document.getElementById('att-status-card');
-          card.className = "status-badge-box status-error";
-          card.innerText = "Access Denied: Student has Completed Programme";
-          
-          document.getElementById('att-approve-btn').style.display = 'none';
-          playAttErrorSound();
-          return;
-        }
-
-        window.currentStudentAttendance = data;
-
-        document.getElementById('att-student-name').innerText = data.fullName || data.studentName || "Student Identified";
-        document.getElementById('att-student-id').innerText = data.studentID || data.studentId || "-";
-        if (data.photoUrl || data.pictureUrl) {
-          document.getElementById('att-photo').src = data.photoUrl || data.pictureUrl;
-        }
-
-        const card = document.getElementById('att-status-card');
-        card.className = "status-badge-box status-success";
-        card.innerText = "Verified! Click Approve to record.";
-
-        document.getElementById('att-approve-btn').style.display = 'inline-flex';
-        playAttSuccessSound();
-      } catch (e) {
-        const card = document.getElementById('att-status-card');
-        card.className = "status-badge-box status-error";
-        card.innerText = "Invalid QR code payload format.";
-        playAttErrorSound();
-      }
-    };
-
-    window.onAttendanceScanFailure = function(error) {
-      // Passive scanning
-    };
-
-    window.resetScannedStudentCard = function() {
-      window.currentStudentAttendance = null;
-      document.getElementById('att-student-name').innerText = "Waiting for Scan...";
-      document.getElementById('att-student-id').innerText = "-";
-      document.getElementById('att-photo').src = "https://via.placeholder.com/130";
-      
-      const card = document.getElementById('att-status-card');
-      card.className = "status-badge-box status-idle";
-      card.innerText = "Ready to scan student ID QR code";
-      document.getElementById('att-approve-btn').style.display = 'none';
-    };
-
-    window.approveAttendanceRecord = async function() {
-      if (!window.currentStudentAttendance) return;
-
-      const btn = document.getElementById('att-approve-btn');
-      btn.disabled = true;
-      btn.innerText = "SAVING...";
-
-      const payload = {
-        programme: document.getElementById("att-programme").value,
-        semester: document.getElementById("att-semester").value,
-        course: document.getElementById("att-course").value,
-        lesson: document.getElementById("att-lesson").value,
-        studentId: window.currentStudentAttendance.studentID || window.currentStudentAttendance.studentId,
-        studentName: window.currentStudentAttendance.fullName || window.currentStudentAttendance.studentName,
-        pictureUrl: window.currentStudentAttendance.photoUrl || window.currentStudentAttendance.pictureUrl || "",
-        status: "Present"
-      };
-
-      const res = await callBackend('recordAttendanceEntry', { payload });
-      btn.disabled = false;
-      btn.innerHTML = `<i class="fa-solid fa-check-circle"></i> APPROVE ATTENDANCE`;
-
-      if (res && res.isDuplicate) {
-        const card = document.getElementById('att-status-card');
-        card.className = "status-badge-box status-error";
-        card.innerText = res.message;
-        playAttErrorSound();
-      } else {
-        btn.style.display = 'none';
-        resetScannedStudentCard();
-        const counterEl = document.getElementById("att-today-count");
-        if (counterEl) counterEl.innerText = parseInt(counterEl.innerText || 0) + 1;
-      }
-    };
-
-    window.submitManualAttendance = async function() {
-      const studentRaw = document.getElementById("att-manual-student").value;
-      const course = document.getElementById("att-manual-course").value;
-      const lesson = document.getElementById("att-manual-topic").value;
-
-      if (!studentRaw || !course || !lesson) {
-        alert("Please select a student and enter course and lesson details.");
-        return;
-      }
-
-      const studentObj = JSON.parse(studentRaw);
-      const btn = document.getElementById("att-manual-submit-btn");
-      btn.disabled = true;
-
-      const payload = {
-        programme: document.getElementById("att-manual-programme").value,
-        semester: document.getElementById("att-manual-semester").value,
-        course: course,
-        lesson: lesson,
-        studentId: studentObj.studentID,
-        studentName: studentObj.studentName,
-        pictureUrl: studentObj.photoUrl || "",
-        status: document.getElementById("att-manual-status").value
-      };
-
-      const res = await callBackend('recordAttendanceEntry', { payload });
-      btn.disabled = false;
-      
-      const statusCard = document.getElementById("att-manual-status-card");
-      statusCard.style.display = "block";
-
-      if (res && res.isDuplicate) {
-        statusCard.className = "status-badge-box status-error";
-        statusCard.innerText = res.message;
-        playAttErrorSound();
-      } else {
-        statusCard.className = "status-badge-box status-success";
-        statusCard.innerText = `Record saved for ${studentObj.studentName}`;
-        const counterEl = document.getElementById("att-today-count");
-        if (counterEl) counterEl.innerText = parseInt(counterEl.innerText || 0) + 1;
-        setTimeout(() => { statusCard.style.display = "none"; }, 3000);
-      }
-    };
-
-    // Trigger rendering automatically on DOM load
-    document.addEventListener("DOMContentLoaded", function() {
-      window.renderAttendanceView();
-    });
-  </script>
-</body>
-</html>
+  function displayVerificationCard(student) {
+    if (!student) {
+      alert("Student ID not found in database!");
+      resumeScanner();
+      return;
+    }
+
+    activeStudentData = student;
+    document.getElementById('student-img').src = student.photoUrl || 'https://via.placeholder.com/150';
+    document.getElementById('student-name').innerText = student.fullName || student.name;
+    document.getElementById('student-id-display').innerText = "ID: " + (student.studentID || student.id);
+    document.getElementById('student-programme').innerText = student.programme || "";
+
+    document.getElementById('verification-card').style.display = 'block';
+  }
+
+  function handleFetchError(err) {
+    alert("Error retrieving student profile: " + err.message);
+    resumeScanner();
+  }
+
+  function approveAttendance() {
+    if (!activeStudentData) return;
+
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(() => {
+          alert("Attendance logged for " + activeStudentData.fullName);
+          resumeScanner();
+        })
+        .markStudentAttendance(activeStudentData.studentID);
+    } else {
+      alert("Attendance marked successfully (Demo)!");
+      resumeScanner();
+    }
+  }
+
+  function rejectStudent() {
+    resumeScanner();
+  }
+
+  function resumeScanner() {
+    activeStudentData = null;
+    document.getElementById('verification-card').style.display = 'none';
+    if (window.html5QrcodeScanner) {
+      window.html5QrcodeScanner.resume();
+    }
+  }
+</script>
