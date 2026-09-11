@@ -175,7 +175,6 @@
 
     .ctrl-att:focus { border-color: var(--accent, #3B82F6); }
 
-    /* Expanded Viewfinder Styles */
     #reader {
       width: 100%;
       min-height: 420px;
@@ -643,7 +642,6 @@
     };
 
     window.onAttendanceScanSuccess = async function(decodedText) {
-      // Pause scanner immediately to stop endless beeping and processing
       if (window.html5QrcodeScanner) {
         try {
           window.html5QrcodeScanner.pause();
@@ -660,7 +658,7 @@
           rawData = { studentID: decodedText };
         }
 
-        const studentID = rawData.studentID || rawData.studentId || decodedText;
+        const scannedID = rawData.studentID || rawData.studentId || decodedText;
 
         if (rawData.status && rawData.status.toLowerCase() === 'completed') {
           const card = document.getElementById('att-status-card');
@@ -674,18 +672,26 @@
         }
 
         // Fetch verified details from database
-        let studentDetails = await callBackend('getStudentDetails', { studentID });
+        let studentDetails = await callBackend('getStudentByID', { studentId: scannedID });
         if (!studentDetails) {
-          studentDetails = rawData; // Fallback to QR payload if database query fails
+          studentDetails = rawData; 
         }
 
-        window.currentStudentAttendance = studentDetails;
+        // Standardize properties to prevent missing field issues
+        const finalID = studentDetails.studentID || studentDetails.studentId || scannedID;
+        const finalName = studentDetails.fullName || studentDetails.studentName || rawData.studentName || "Unknown Student";
+        const finalPhoto = studentDetails.photoUrl || studentDetails.pictureUrl || rawData.photoUrl || "https://via.placeholder.com/130";
 
-        document.getElementById('att-student-name').innerText = studentDetails.fullName || studentDetails.studentName || "Student Identified";
-        document.getElementById('att-student-id').innerText = studentDetails.studentID || studentDetails.studentId || studentID;
-        if (studentDetails.photoUrl || studentDetails.pictureUrl) {
-          document.getElementById('att-photo').src = studentDetails.photoUrl || studentDetails.pictureUrl;
-        }
+        window.currentStudentAttendance = {
+          studentID: finalID,
+          studentName: finalName,
+          photoUrl: finalPhoto
+        };
+
+        // Render to UI elements
+        document.getElementById('att-student-name').innerText = finalName;
+        document.getElementById('att-student-id').innerText = finalID;
+        document.getElementById('att-photo').src = finalPhoto;
 
         const card = document.getElementById('att-status-card');
         card.className = "status-badge-box status-success";
@@ -694,13 +700,13 @@
         document.getElementById('att-approve-btn').style.display = 'inline-block';
         document.getElementById('att-reject-btn').style.display = 'inline-block';
         
-        // Single success sound alert
         playAttSuccessSound();
 
       } catch (e) {
+        console.error("Scan processing error:", e);
         const card = document.getElementById('att-status-card');
         card.className = "status-badge-box status-error";
-        card.innerText = "Invalid QR code payload format.";
+        card.innerText = "Error parsing scanned QR data.";
         playAttErrorSound();
       }
     };
@@ -721,7 +727,6 @@
       document.getElementById('att-approve-btn').style.display = 'none';
       document.getElementById('att-reject-btn').style.display = 'none';
 
-      // Resume camera scanning loop
       if (window.html5QrcodeScanner) {
         try {
           window.html5QrcodeScanner.resume();
@@ -736,7 +741,24 @@
     };
 
     window.approveAttendanceRecord = async function() {
-      if (!window.currentStudentAttendance) return;
+      // Direct UI fallback in case window.currentStudentAttendance is empty
+      const uiStudentID = document.getElementById('att-student-id').innerText.trim();
+      const uiStudentName = document.getElementById('att-student-name').innerText.trim();
+      const uiPhotoUrl = document.getElementById('att-photo').src;
+
+      const finalStudentID = (window.currentStudentAttendance && window.currentStudentAttendance.studentID) 
+        ? window.currentStudentAttendance.studentID 
+        : (uiStudentID !== '-' ? uiStudentID : '');
+
+      const finalStudentName = (window.currentStudentAttendance && window.currentStudentAttendance.studentName) 
+        ? window.currentStudentAttendance.studentName 
+        : (uiStudentName !== 'Waiting for Scan...' ? uiStudentName : '');
+
+      if (!finalStudentID) {
+        alert("No valid student ID detected. Please scan again.");
+        resetScannedStudentCard();
+        return;
+      }
 
       const approveBtn = document.getElementById('att-approve-btn');
       const rejectBtn = document.getElementById('att-reject-btn');
@@ -750,9 +772,11 @@
         semester: document.getElementById("att-semester").value,
         course: document.getElementById("att-course").value,
         lesson: document.getElementById("att-lesson").value,
-        studentId: window.currentStudentAttendance.studentID || window.currentStudentAttendance.studentId,
-        studentName: window.currentStudentAttendance.fullName || window.currentStudentAttendance.studentName,
-        pictureUrl: window.currentStudentAttendance.photoUrl || window.currentStudentAttendance.pictureUrl || "",
+        studentId: finalStudentID,
+        studentID: finalStudentID,
+        studentName: finalStudentName,
+        fullName: finalStudentName,
+        pictureUrl: (window.currentStudentAttendance && window.currentStudentAttendance.photoUrl) ? window.currentStudentAttendance.photoUrl : uiPhotoUrl,
         status: "Present"
       };
 
@@ -794,7 +818,9 @@
         course: course,
         lesson: lesson,
         studentId: studentObj.studentID,
+        studentID: studentObj.studentID,
         studentName: studentObj.studentName,
+        fullName: studentObj.studentName,
         pictureUrl: studentObj.photoUrl || "",
         status: document.getElementById("att-manual-status").value
       };
