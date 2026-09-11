@@ -398,7 +398,7 @@
     if (document.getElementById("manualProgramme").value && cohortEl.value) loadManualStudents();
   }
 
-  async function loadManualStudents() {
+ async function loadManualStudents() {
     const programme = document.getElementById("manualProgramme").value;
     const cohort = document.getElementById("manualCohort").value;
     const select = document.getElementById("manualStudent");
@@ -496,9 +496,41 @@
     ).join("");
   }
 
-  // Matches the attached code's scan handler: JSON-or-raw decode, getStudentByID
-  // lookup, "completed" status gate, and the passport/pictureUrl/photoUrl fallback
-  // chain for the photo.
+  const PLACEHOLDER_PHOTO = "https://via.placeholder.com/150";
+  let rosterCache = null; // lazy full-roster cache, keyed off getStudents()
+
+  // Normalizes whatever shape the backend hands back into one consistent
+  // record. Your actual Students sheet schema (per getStudents() in Code.gs)
+  // uses id / name / passport / status — this checks those first and only
+  // falls back to the older studentID/fullName/pictureUrl guesses.
+  function normalizeStudent(s, fallbackId) {
+    if (!s) return null;
+    return {
+      id: s.id || s.studentID || s.studentId || fallbackId,
+      name: s.name || s.fullName || s.studentName || "Unknown Student",
+      photo: s.passport || s.pictureUrl || s.photoUrl || s.photo || "",
+      status: s.status || "Active"
+    };
+  }
+
+  // Looks up a single student by ID. Tries the direct getStudentByID action
+  // first; if that comes back empty or without a photo, falls back to your
+  // known-working getStudents() roster (cached) and matches client-side —
+  // this is the same data your Students.html list already displays correctly.
+  async function lookupStudent(scannedID) {
+    let raw = await callBackend('getStudentByID', { studentId: scannedID });
+    let student = normalizeStudent(raw, scannedID);
+
+    if (!student || !student.photo) {
+      if (!rosterCache) rosterCache = await callBackend('getStudents');
+      if (rosterCache) {
+        const match = rosterCache.find(s => String(s.id).trim() === String(scannedID).trim());
+        if (match) student = normalizeStudent(match, scannedID);
+      }
+    }
+    return student;
+  }
+
   async function onScanSuccess(decodedText) {
     if (scannerBusy) return;
     scannerBusy = true;
@@ -507,11 +539,12 @@
     const photo = document.getElementById("studentPhoto");
     const nameEl = document.getElementById("studentName");
     const metaEl = document.getElementById("studentMeta");
+    photo.onerror = () => { photo.src = PLACEHOLDER_PHOTO; };
 
     let scannedID = decodedText.trim();
     try {
       const parsed = JSON.parse(decodedText);
-      scannedID = parsed.studentID || parsed.studentId || decodedText;
+      scannedID = parsed.studentID || parsed.studentId || parsed.id || decodedText;
     } catch (e) { /* raw text QR code */ }
 
     photo.src = ""; photo.classList.add("pending");
@@ -520,9 +553,9 @@
     approveBtn.classList.remove("ready"); approveBtn.disabled = true; approveBtn.textContent = "Mark present";
     openSheet();
 
-    const studentData = await callBackend('getStudentByID', { studentId: scannedID });
+    const student = await lookupStudent(scannedID);
 
-    if (!studentData) {
+    if (!student) {
       flash("rgba(226,96,79,0.5)");
       nameEl.textContent = "Not recognized"; metaEl.textContent = scannedID;
       renderChecklist([{ label: `Student ID (${scannedID}) not found`, pass: false }]);
@@ -530,32 +563,30 @@
       return;
     }
 
-    const finalID = studentData.studentID || studentData.studentId || scannedID;
-    const finalName = studentData.fullName || studentData.studentName || "Unknown Student";
-    const photoUrl = studentData.passport || studentData.pictureUrl || studentData.photoUrl || "";
-    const isCompleted = studentData.status && studentData.status.toLowerCase() === 'completed';
+    currentStudent = student;
+    photo.src = student.photo || PLACEHOLDER_PHOTO;
+    photo.classList.remove("pending");
+    nameEl.textContent = student.name;
+    metaEl.textContent = student.id;
 
-    currentStudent = { id: finalID, name: finalName, photo: photoUrl, status: studentData.status };
+    // Registration status is Active / Graduated / Suspended (see Code.gs) —
+    // only Active students should be marked present.
+    const isActive = (student.status || "Active").toLowerCase() === "active";
 
-    photo.src = photoUrl; photo.classList.remove("pending");
-    nameEl.textContent = finalName;
-    metaEl.textContent = finalID;
-
-    renderChecklist([
-      { label: "Student record found", pass: true },
-      { label: "Active enrollment status", pass: !isCompleted }
-    ]);
-
-    if (isCompleted) {
+    if (!isActive) {
       flash("rgba(226,96,79,0.5)");
       renderChecklist([
         { label: "Student record found", pass: true },
-        { label: "Access Denied: status is Completed", pass: false }
+        { label: `Access Denied: status is ${student.status}`, pass: false }
       ]);
       approveBtn.disabled = true;
       playAttErrorSound();
     } else {
       flash("rgba(217,164,65,0.35)");
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: "Active enrollment status", pass: true }
+      ]);
       approveBtn.disabled = false; approveBtn.classList.add("ready");
       playAttSuccessSound();
     }
