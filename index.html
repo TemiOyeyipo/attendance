@@ -245,7 +245,6 @@
     const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec"; 
 
     window.html5QrcodeScanner = window.html5QrcodeScanner || null;
-    window.currentStudentAttendance = window.currentStudentAttendance || null;
 
     async function callBackend(action, params = {}) {
       if (typeof google !== 'undefined' && google.script && google.script.run) {
@@ -353,7 +352,7 @@
               </div>
               <div class="student-card-box">
                 <img id="att-photo" class="student-photo-img" src="https://via.placeholder.com/130" alt="Student Photo">
-                <div id="att-student-name" class="student-name-txt">Waiting for Scan...</div>
+                <div id="att-student-name" class="student-name-txt" data-studentid="" data-studentname="" data-photourl="">Waiting for Scan...</div>
                 <div id="att-student-id" class="student-id-txt">-</div>
                 <div id="att-status-card" class="status-badge-box status-idle">Ready to scan student ID QR code</div>
                 
@@ -671,7 +670,7 @@
           return;
         }
 
-        // Fetch verified details from database
+        // Fetch verified details from Google Sheets backend
         let studentDetails = await callBackend('getStudentByID', { studentId: scannedID });
         if (!studentDetails) {
           studentDetails = rawData; 
@@ -679,17 +678,16 @@
 
         // Standardize properties to prevent missing field issues
         const finalID = studentDetails.studentID || studentDetails.studentId || scannedID;
-        const finalName = studentDetails.fullName || studentDetails.studentName || rawData.studentName || "Unknown Student";
-        const finalPhoto = studentDetails.photoUrl || studentDetails.pictureUrl || rawData.photoUrl || "https://via.placeholder.com/130";
+        const finalName = studentDetails.fullName || studentDetails.studentName || rawData.studentName || rawData.fullName || "Unknown Student";
+        const finalPhoto = studentDetails.photoUrl || studentDetails.pictureUrl || rawData.photoUrl || rawData.pictureUrl || "https://via.placeholder.com/130";
 
-        window.currentStudentAttendance = {
-          studentID: finalID,
-          studentName: finalName,
-          photoUrl: finalPhoto
-        };
+        // Store directly on HTML element attributes (same technique as manual select option values)
+        const nameEl = document.getElementById('att-student-name');
+        nameEl.innerText = finalName;
+        nameEl.setAttribute('data-studentid', finalID);
+        nameEl.setAttribute('data-studentname', finalName);
+        nameEl.setAttribute('data-photourl', finalPhoto);
 
-        // Render to UI elements
-        document.getElementById('att-student-name').innerText = finalName;
         document.getElementById('att-student-id').innerText = finalID;
         document.getElementById('att-photo').src = finalPhoto;
 
@@ -716,8 +714,12 @@
     };
 
     window.resetScannedStudentCard = function() {
-      window.currentStudentAttendance = null;
-      document.getElementById('att-student-name').innerText = "Waiting for Scan...";
+      const nameEl = document.getElementById('att-student-name');
+      nameEl.innerText = "Waiting for Scan...";
+      nameEl.setAttribute('data-studentid', '');
+      nameEl.setAttribute('data-studentname', '');
+      nameEl.setAttribute('data-photourl', '');
+
       document.getElementById('att-student-id').innerText = "-";
       document.getElementById('att-photo').src = "https://via.placeholder.com/130";
       
@@ -741,23 +743,21 @@
     };
 
     window.approveAttendanceRecord = async function() {
-      // Direct UI fallback in case window.currentStudentAttendance is empty
-      const uiStudentID = document.getElementById('att-student-id').innerText.trim();
-      const uiStudentName = document.getElementById('att-student-name').innerText.trim();
-      const uiPhotoUrl = document.getElementById('att-photo').src;
+      const nameEl = document.getElementById('att-student-name');
+      
+      // Pull student values from data attributes (Primary), innerText (Secondary)
+      let sID = nameEl.getAttribute('data-studentid') || document.getElementById('att-student-id').innerText.trim();
+      let sName = nameEl.getAttribute('data-studentname') || nameEl.innerText.trim();
+      let sPhoto = nameEl.getAttribute('data-photourl') || document.getElementById('att-photo').src;
 
-      const finalStudentID = (window.currentStudentAttendance && window.currentStudentAttendance.studentID) 
-        ? window.currentStudentAttendance.studentID 
-        : (uiStudentID !== '-' ? uiStudentID : '');
-
-      const finalStudentName = (window.currentStudentAttendance && window.currentStudentAttendance.studentName) 
-        ? window.currentStudentAttendance.studentName 
-        : (uiStudentName !== 'Waiting for Scan...' ? uiStudentName : '');
-
-      if (!finalStudentID) {
-        alert("No valid student ID detected. Please scan again.");
+      if (!sID || sID === '-' || sID === 'undefined') {
+        alert("No valid student ID found. Please re-scan.");
         resetScannedStudentCard();
         return;
+      }
+
+      if (sName === 'Waiting for Scan...' || !sName) {
+        sName = "Unknown Student";
       }
 
       const approveBtn = document.getElementById('att-approve-btn');
@@ -767,16 +767,17 @@
       rejectBtn.disabled = true;
       approveBtn.innerText = "SAVING...";
 
+      // Exact payload structure matching manual record submit
       const payload = {
         programme: document.getElementById("att-programme").value,
         semester: document.getElementById("att-semester").value,
         course: document.getElementById("att-course").value,
         lesson: document.getElementById("att-lesson").value,
-        studentId: finalStudentID,
-        studentID: finalStudentID,
-        studentName: finalStudentName,
-        fullName: finalStudentName,
-        pictureUrl: (window.currentStudentAttendance && window.currentStudentAttendance.photoUrl) ? window.currentStudentAttendance.photoUrl : uiPhotoUrl,
+        studentId: sID,
+        studentID: sID,
+        studentName: sName,
+        fullName: sName,
+        pictureUrl: sPhoto,
         status: "Present"
       };
 
