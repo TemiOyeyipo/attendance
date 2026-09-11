@@ -640,75 +640,73 @@
       }
     };
 
-    window.onAttendanceScanSuccess = async function(decodedText) {
-      if (window.html5QrcodeScanner) {
-        try {
-          window.html5QrcodeScanner.pause();
-        } catch (e) {
-          console.warn("Could not pause scanner:", e);
-        }
-      }
+window.onAttendanceScanSuccess = async function(decodedText) {
+  if (window.html5QrcodeScanner) {
+    try { window.html5QrcodeScanner.pause(); } catch (e) { console.warn(e); }
+  }
 
-      try {
-        let rawData = {};
-        try {
-          rawData = JSON.parse(decodedText);
-        } catch (e) {
-          rawData = { studentID: decodedText };
-        }
+  try {
+    let scannedID = decodedText.trim();
+    
+    // Handle JSON object QR codes or raw string text
+    try {
+      const parsed = JSON.parse(decodedText);
+      scannedID = parsed.studentID || parsed.studentId || decodedText;
+    } catch (e) { /* raw text */ }
 
-        const scannedID = rawData.studentID || rawData.studentId || decodedText;
+    // Indicate loading state
+    const card = document.getElementById('att-status-card');
+    card.className = "status-badge-box status-idle";
+    card.innerText = "Fetching student details from database...";
 
-        if (rawData.status && rawData.status.toLowerCase() === 'completed') {
-          const card = document.getElementById('att-status-card');
-          card.className = "status-badge-box status-error";
-          card.innerText = "Access Denied: Student has Completed Programme";
-          
-          document.getElementById('att-approve-btn').style.display = 'none';
-          document.getElementById('att-reject-btn').style.display = 'none';
-          playAttErrorSound();
-          return;
-        }
+    // 1. Query Google Sheet backend by Student ID
+    const studentData = await callBackend('getStudentByID', { studentId: scannedID });
 
-        // Fetch verified details from Google Sheets backend
-        let studentDetails = await callBackend('getStudentByID', { studentId: scannedID });
-        if (!studentDetails) {
-          studentDetails = rawData; 
-        }
+    if (!studentData) {
+      card.className = "status-badge-box status-error";
+      card.innerText = `Student ID (${scannedID}) not found in sheet.`;
+      playAttErrorSound();
+      return;
+    }
 
-        // Standardize properties to prevent missing field issues
-        const finalID = studentDetails.studentID || studentDetails.studentId || scannedID;
-        const finalName = studentDetails.fullName || studentDetails.studentName || rawData.studentName || rawData.fullName || "Unknown Student";
-        const finalPhoto = studentDetails.photoUrl || studentDetails.pictureUrl || rawData.photoUrl || rawData.pictureUrl || "https://via.placeholder.com/130";
+    if (studentData.status && studentData.status.toLowerCase() === 'completed') {
+      card.className = "status-badge-box status-error";
+      card.innerText = "Access Denied: Student status is Completed";
+      playAttErrorSound();
+      return;
+    }
 
-        // Store directly on HTML element attributes (same technique as manual select option values)
-        const nameEl = document.getElementById('att-student-name');
-        nameEl.innerText = finalName;
-        nameEl.setAttribute('data-studentid', finalID);
-        nameEl.setAttribute('data-studentname', finalName);
-        nameEl.setAttribute('data-photourl', finalPhoto);
+    // 2. Extract Name, ID, and Base64 Passport Image
+    const finalID = studentData.studentID || studentData.studentId || scannedID;
+    const finalName = studentData.fullName || studentData.studentName || "Unknown Student";
+    const base64Image = studentData.passport || studentData.pictureUrl || studentData.photoUrl || "https://via.placeholder.com/130";
 
-        document.getElementById('att-student-id').innerText = finalID;
-        document.getElementById('att-photo').src = finalPhoto;
+    // 3. Render extracted details to DOM
+    const nameEl = document.getElementById('att-student-name');
+    nameEl.innerText = finalName;
+    nameEl.setAttribute('data-studentid', finalID);
+    nameEl.setAttribute('data-studentname', finalName);
+    nameEl.setAttribute('data-photourl', base64Image);
 
-        const card = document.getElementById('att-status-card');
-        card.className = "status-badge-box status-success";
-        card.innerText = "Verified! Approve or Reject to continue.";
+    document.getElementById('att-student-id').innerText = finalID;
+    document.getElementById('att-photo').src = base64Image;
 
-        document.getElementById('att-approve-btn').style.display = 'inline-block';
-        document.getElementById('att-reject-btn').style.display = 'inline-block';
-        
-        playAttSuccessSound();
+    card.className = "status-badge-box status-success";
+    card.innerText = "Student Verified! Review details and Approve to log attendance.";
 
-      } catch (e) {
-        console.error("Scan processing error:", e);
-        const card = document.getElementById('att-status-card');
-        card.className = "status-badge-box status-error";
-        card.innerText = "Error parsing scanned QR data.";
-        playAttErrorSound();
-      }
-    };
+    document.getElementById('att-approve-btn').style.display = 'inline-block';
+    document.getElementById('att-reject-btn').style.display = 'inline-block';
+    
+    playAttSuccessSound();
 
+  } catch (err) {
+    console.error("Scan process error:", err);
+    const card = document.getElementById('att-status-card');
+    card.className = "status-badge-box status-error";
+    card.innerText = "Failed to process student lookup.";
+    playAttErrorSound();
+  }
+};
     window.onAttendanceScanFailure = function(error) {
       // Passive scanning loop
     };
