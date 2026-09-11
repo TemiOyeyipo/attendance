@@ -206,7 +206,7 @@
 
 <script>
   // URL of your Apps Script Web App Deployment
-  const GAS_WEB_APP_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL";
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
 
   // Helper function to call Apps Script functions via Fetch API
   async function runAppsScript(action, payload = {}) {
