@@ -531,7 +531,7 @@
     return student;
   }
 
-  async function onScanSuccess(decodedText) {
+async function onScanSuccess(decodedText) {
     if (scannerBusy) return;
     scannerBusy = true;
     if (html5QrCode) { try { html5QrCode.pause(); } catch (e) {} }
@@ -555,22 +555,28 @@
 
     const student = await lookupStudent(scannedID);
 
-    if (!student) {
+    // FIX 1: Handle non-existent student or API error
+    if (!student || student.found === false) {
       flash("rgba(226,96,79,0.5)");
       nameEl.textContent = "Not recognized"; metaEl.textContent = scannedID;
       renderChecklist([{ label: `Student ID (${scannedID}) not found`, pass: false }]);
       playAttErrorSound();
+      
+      // Release scanner lock and resume hardware scanner after 2.5s delay
+      setTimeout(() => {
+        scannerBusy = false;
+        if (html5QrCode) { try { html5QrCode.resume(); } catch (e) {} }
+      }, 2500);
       return;
     }
 
     currentStudent = student;
-    photo.src = student.photo || PLACEHOLDER_PHOTO;
+    photo.src = student.photo || student.photoUrl || PLACEHOLDER_PHOTO;
     photo.classList.remove("pending");
-    nameEl.textContent = student.name;
-    metaEl.textContent = student.id;
+    nameEl.textContent = student.name || student.studentName || student.fullName;
+    metaEl.textContent = student.id || student.studentID;
 
-    // Registration status is Active / Graduated / Suspended (see Code.gs) —
-    // only Active students should be marked present.
+    // Registration status validation
     const isActive = (student.status || "Active").toLowerCase() === "active";
 
     if (!isActive) {
@@ -581,6 +587,12 @@
       ]);
       approveBtn.disabled = true;
       playAttErrorSound();
+
+      // FIX 2: Release scanner lock for inactive students as well
+      setTimeout(() => {
+        scannerBusy = false;
+        if (html5QrCode) { try { html5QrCode.resume(); } catch (e) {} }
+      }, 2500);
     } else {
       flash("rgba(217,164,65,0.35)");
       renderChecklist([
@@ -589,6 +601,9 @@
       ]);
       approveBtn.disabled = false; approveBtn.classList.add("ready");
       playAttSuccessSound();
+      
+      // Reset lock flag so next scan can proceed after sheet confirmation
+      scannerBusy = false;
     }
   }
 
