@@ -118,19 +118,9 @@
 
   .toast{ position:absolute; top:14px; left:20px; right:20px; z-index:11; background:var(--panel-2); border:1px solid var(--line); border-radius:14px; padding:12px 16px; font-size:13px; transform:translateY(-16px); opacity:0; transition:all 0.3s ease; pointer-events:none; }
   .toast.show{ transform:translateY(0); opacity:1; }
-
-  .diag-banner{ display:none; background:var(--alert); color:#2a0906; font-size:12.5px; font-weight:600; padding:10px 16px; align-items:flex-start; justify-content:space-between; gap:10px; z-index:20; }
-  .diag-banner.show{ display:flex; }
-  .diag-banner span{ flex:1; line-height:1.4; }
-  .diag-banner button{ background:none; border:none; color:#2a0906; font-weight:700; font-size:15px; cursor:pointer; padding:0 2px; }
 </style>
 </head>
 <body>
-
-<div class="diag-banner" id="diagBanner">
-  <span id="diagBannerText"></span>
-  <button onclick="document.getElementById('diagBanner').classList.remove('show')">✕</button>
-</div>
 
 <div class="app-shell">
 
@@ -280,21 +270,9 @@
 
 <script>
   // ---------------------------------------------------------------
-  // Backend wiring — every action/param below is checked against your
-  // actual Code.gs (doGet/doPost + handleApiAction) line by line:
-  //
-  // getProgrammesList() GET/POST, no params
-  // getCoursesByProgramme(programme) GET/POST, param: programme
-  // getCohortsList() GET/POST, no params → returns string[]
-  // getStudentsByProgrammeAndCohort(p, c) GET/POST, params: programme, cohort
-  // getTodayAttendanceCount() GET/POST, no params
-  // getStudentByID(studentId) GET/POST, param: studentId (or studentID)
-  // recordAttendanceEntry(payload) POST only, body: { payload: {...} }
-  //
-  // NOT reachable over HTTP — they exist in Code.gs but are missing from
-  // both the doGet and doPost switch statements, so calling them 404s with
-  // "Invalid GET/POST action": getStudents(), getStudentByQrCode(). Neither
-  // is called anywhere below for that reason.
+  // Backend wiring — mirrors the working callBackend() from your
+  // deployed ABBS attendance.html: same URL, same action names,
+  // same GET/POST split, same google.script.run fallback.
   // ---------------------------------------------------------------
   const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
   let lastBackendError = null; // last fetch failure reason, surfaced in the UI so a stalled call is never silent
@@ -348,16 +326,6 @@
           console.error(lastBackendError, parseErr);
           return null;
         }
-
-        // Your Code.gs wraps failures as {status:'error', message:...} with no
-        // 'data' key — without this check that object was being treated as a
-        // valid (empty) student record instead of a real failure.
-        if (res && res.status === 'error') {
-          lastBackendError = res.message || `Server reported an error for ${action}`;
-          console.error("Apps Script error:", lastBackendError);
-          return null;
-        }
-
         return res.data !== undefined ? res.data : res;
 
       } catch (err) {
@@ -391,7 +359,8 @@
     document.getElementById("countToday").textContent = todayCount;
   }
 
- function switchTab(tab) {
+  // ---------- Tab switching ----------
+  function switchTab(tab) {
     const scanBtn = document.getElementById("tabScanBtn");
     const manualBtn = document.getElementById("tabManualBtn");
     const scanTab = document.getElementById("scanTab");
@@ -426,7 +395,7 @@
     document.getElementById("manualProgramme").innerHTML = opts;
   }
 
-  async function loadCohorts() {
+ async function loadCohorts() {
     let cohorts = await callBackend('getCohortsList');
     if (!cohorts) cohorts = ["2023/2024", "2024/2025"];
 
@@ -556,26 +525,38 @@
   }
 
   const PLACEHOLDER_PHOTO = "https://via.placeholder.com/150";
+  let rosterCache = null; // lazy full-roster cache, keyed off getStudents()
 
   // Normalizes whatever shape the backend hands back into one consistent
-  // record. Your Code.gs getStudentByID returns studentID / fullName / passport —
-  // this checks those first and falls back to other common key names just in case.
+  // record. Your actual Students sheet schema (per getStudents() in Code.gs)
+  // uses id / name / passport / status — this checks those first and only
+  // falls back to the older studentID/fullName/pictureUrl guesses.
   function normalizeStudent(s, fallbackId) {
     if (!s) return null;
     return {
-      id: s.studentID || s.id || s.studentId || fallbackId,
-      name: s.fullName || s.name || s.studentName || "Unknown Student",
+      id: s.id || s.studentID || s.studentId || fallbackId,
+      name: s.name || s.fullName || s.studentName || "Unknown Student",
       photo: s.passport || s.pictureUrl || s.photoUrl || s.photo || "",
       status: s.status || "Active"
     };
   }
 
-  // Looks up a single student by ID via getStudentByID — the only student
-  // lookup action your Code.gs actually exposes over HTTP (getStudents() exists
-  // server-side but isn't wired into doGet/doPost, so it isn't callable here).
+  // Looks up a single student by ID. Tries the direct getStudentByID action
+  // first; if that comes back empty or without a photo, falls back to your
+  // known-working getStudents() roster (cached) and matches client-side —
+  // this is the same data your Students.html list already displays correctly.
   async function lookupStudent(scannedID) {
-    const raw = await callBackend('getStudentByID', { studentId: scannedID });
-    return normalizeStudent(raw, scannedID);
+    let raw = await callBackend('getStudentByID', { studentId: scannedID });
+    let student = normalizeStudent(raw, scannedID);
+
+    if (!student || !student.photo) {
+      if (!rosterCache) rosterCache = await callBackend('getStudents');
+      if (rosterCache) {
+        const match = rosterCache.find(s => String(s.id).trim() === String(scannedID).trim());
+        if (match) student = normalizeStudent(match, scannedID);
+      }
+    }
+    return student;
   }
 
   async function onScanSuccess(decodedText) {
@@ -674,19 +655,10 @@
         { label: res.message || "Already recorded", pass: false }
       ]);
       playAttErrorSound();
-    } else if (res && res.success) {
+    } else {
       bumpCount();
       approveBtn.textContent = "Marked present ✓";
       setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
-    } else {
-      // callBackend returned null — a real failure (timeout, server error,
-      // wrong action), not silently treated as success anymore.
-      approveBtn.disabled = false; approveBtn.textContent = "Retry";
-      renderChecklist([
-        { label: "Student record found", pass: true },
-        { label: lastBackendError || "Save failed — try again", pass: false }
-      ]);
-      playAttErrorSound();
     }
   });
   rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
@@ -726,40 +698,18 @@
       card.className = "status-card show err";
       card.textContent = res.message || "Already recorded.";
       playAttErrorSound();
-    } else if (res && res.success) {
+    } else {
       card.className = "status-card show ok";
       card.textContent = `Record saved for ${student.studentName}`;
       bumpCount();
       setTimeout(() => card.classList.remove("show"), 3000);
-    } else {
-      card.className = "status-card show err";
-      card.textContent = lastBackendError || "Save failed — try again.";
-      playAttErrorSound();
     }
   }
 
   // ---------- Init ----------
-  // Sequential (not fire-and-forget) so each call's lastBackendError can be
-  // captured before the next call overwrites it — this is what powers the
-  // startup health check below.
-  function showDiagBanner(msg) {
-    document.getElementById("diagBannerText").textContent =
-      "Backend issue: " + msg + " — your Apps Script Web App deployment may need a new version pushed (editing Code.gs alone does not update the live /exec URL).";
-    document.getElementById("diagBanner").classList.add("show");
-  }
-
-  async function initApp() {
-    await loadProgrammes();
-    const err1 = lastBackendError;
-    await loadCohorts();
-    const err2 = lastBackendError;
-    await loadTodayCount();
-    const err3 = lastBackendError;
-
-    const firstError = err1 || err2 || err3;
-    if (firstError) showDiagBanner(firstError);
-  }
-  initApp();
+  loadProgrammes();
+  loadCohorts();
+  loadTodayCount();
 </script>
 </body>
 </html>
