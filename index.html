@@ -382,7 +382,7 @@
   document.getElementById("scanTab").style.flexDirection = "column";
   document.getElementById("scanTab").style.flex = "1";
 
-  // ---------- Loading dropdown data (real backend, with graceful fallback) ----------
+  // ---------- Loading dropdown data ----------
   async function loadProgrammes() {
     let list = await callBackend('getProgrammesList');
     if (!list) list = ["Computer Science", "Software Engineering", "Information Technology"];
@@ -395,7 +395,7 @@
     document.getElementById("manualProgramme").innerHTML = opts;
   }
 
- async function loadCohorts() {
+  async function loadCohorts() {
     let cohorts = await callBackend('getCohortsList');
     if (!cohorts) cohorts = ["2023/2024", "2024/2025"];
 
@@ -449,11 +449,12 @@
 
     let html = '<option value="">Select Student...</option>';
     students.forEach(s => {
-      const cleanName = (s.studentName || '').replace(/'/g, "&apos;");
+      const cleanName = (s.studentName || s.name || '').replace(/'/g, "&apos;");
+      const cleanID = s.studentID || s.id || '';
       const payload = JSON.stringify({
-        studentID: s.studentID, studentName: cleanName, photoUrl: s.photoUrl || ""
+        studentID: cleanID, studentName: cleanName, photoUrl: s.photoUrl || s.passport || ""
       }).replace(/'/g, "&apos;");
-      html += `<option value='${payload}'>${s.studentID} - ${cleanName}</option>`;
+      html += `<option value='${payload}'>${cleanID} - ${cleanName}</option>`;
     });
     select.innerHTML = html;
   }
@@ -489,6 +490,7 @@
     if (!confirm("End this attendance session?")) return;
     if (html5QrCode) { html5QrCode.stop().catch(()=>{}); html5QrCode = null; }
     SESSION = null;
+    currentStudent = null;
     document.getElementById("sessionStrip").classList.remove("show");
     document.getElementById("scanStage").classList.remove("show");
     document.getElementById("setupPane").style.display = "block";
@@ -512,6 +514,7 @@
   }
   function openSheet() { backdrop.classList.add("show"); sheet.classList.add("show"); }
   function closeSheet() {
+    currentStudent = null; // Clear student record on sheet dismiss
     backdrop.classList.remove("show"); sheet.classList.remove("show");
     setTimeout(() => { if (html5QrCode) html5QrCode.resume().catch(()=>{}); }, 300);
   }
@@ -519,29 +522,30 @@
     const el = document.getElementById("checklist");
     el.innerHTML = rows.map(r =>
       `<div class="check-row ${r.pass === null ? '' : r.pass ? 'pass' : 'fail'}">
-         <span class="icon">${r.pass === null ? '…' : r.pass ? '?' : '?'}</span><span>${r.label}</span>
+         <span class="icon">${r.pass === null ? '…' : r.pass ? '✓' : '✕'}</span><span>${r.label}</span>
        </div>`
     ).join("");
   }
 
   const PLACEHOLDER_PHOTO = "https://via.placeholder.com/150";
-  let rosterCache = null; // lazy full-roster cache, keyed off getStudents()
+  let rosterCache = null; 
 
-  // Normalizes whatever shape the backend hands back into one consistent
-  // record. Your actual Students sheet schema (per getStudents() in Code.gs)
-  // uses id / name / passport / status — this checks those first and only
-  // falls back to the older studentID/fullName/pictureUrl guesses.
   function normalizeStudent(s, fallbackId) {
     if (!s) return null;
     return {
       id: s.id || s.studentID || s.studentId || fallbackId,
-      name: s.name || s.fullName || s.studentName || "Unknown Student",
+      name: s.name || s.fullName || s.studentName || "",
       photo: s.passport || s.pictureUrl || s.photoUrl || s.photo || "",
       status: s.status || "Active"
     };
   }
 
-// Looks up a single student by ID. Tries direct getStudentByID first;
+  // Strict helper validator
+  function isValidStudent(s) {
+    return s && String(s.name || '').trim() !== "" && String(s.id || '').trim() !== "";
+  }
+
+  // Looks up a single student by ID. Tries direct getStudentByID first;
   // if that comes back empty or without a photo, falls back to the roster cache.
   // Returns NULL if the student is not registered in either source.
   async function lookupStudent(scannedID) {
@@ -554,9 +558,6 @@
     } catch (err) {
       console.warn('Direct student lookup failed, falling back to roster cache:', err);
     }
-
-    // Check if valid student record was returned (must have a real name or ID)
-    const isValidStudent = (s) => s && (s.name || s.studentName || s.fullName) && String(s.name).trim() !== "";
 
     // 2. Fallback: Search the full cached roster if direct lookup failed or lacked details/photo
     if (!isValidStudent(student) || !student.photo) {
@@ -589,6 +590,10 @@
   async function onScanSuccess(decodedText) {
     if (scannerBusy) return;
     scannerBusy = true;
+
+    // CLEAR STALE DATA IMMEDIATELY
+    currentStudent = null;
+
     if (html5QrCode) { try { html5QrCode.pause(); } catch (e) {} }
 
     const photo = document.getElementById("studentPhoto");
@@ -610,25 +615,27 @@
 
     const student = await lookupStudent(scannedID);
 
+    // UNREGISTERED STUDENT HANDLER
     if (!student) {
+      currentStudent = null;
       flash("rgba(226,96,79,0.5)");
       nameEl.textContent = "Not recognized"; metaEl.textContent = scannedID;
       renderChecklist([{
-        label: lastBackendError || `Student ID (${scannedID}) not found`,
+        label: lastBackendError || `Student ID (${scannedID}) not found / Unregistered`,
         pass: false
       }]);
+      approveBtn.disabled = true;
       playAttErrorSound();
       return;
     }
 
+    // REGISTERED STUDENT HANDLER
     currentStudent = student;
     photo.src = student.photo || PLACEHOLDER_PHOTO;
     photo.classList.remove("pending");
     nameEl.textContent = student.name;
     metaEl.textContent = student.id;
 
-    // Registration status is Active / Graduated / Suspended (see Code.gs) —
-    // only Active students should be marked present.
     const isActive = (student.status || "Active").toLowerCase() === "active";
 
     if (!isActive) {
@@ -659,10 +666,13 @@
     }
   }
 
-  // Matches recordAttendanceEntry payload shape from the attached code exactly
-  // (both id-key variants, both name-key variants, pictureUrl, status).
   approveBtn.addEventListener("click", async () => {
-    if (!currentStudent || approveBtn.disabled) return;
+    // GUARD CLAUSE: Strict verification check
+    if (!currentStudent || !isValidStudent(currentStudent) || approveBtn.disabled) {
+      alert("Cannot record attendance: No valid registered student selected.");
+      return;
+    }
+
     approveBtn.disabled = true; approveBtn.textContent = "Saving…";
 
     const payload = {
@@ -684,10 +694,12 @@
       playAttErrorSound();
     } else {
       bumpCount();
-      approveBtn.textContent = "Marked present ?";
+      approveBtn.textContent = "Marked present ✓";
+      currentStudent = null; // Clear state after success
       setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
     }
   });
+
   rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
   backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
 
