@@ -29,7 +29,16 @@
     display:flex; flex-direction:column; gap:12px;
   }
   .topbar-row{ display:flex; align-items:center; justify-content:space-between; }
-  .app-title{ font-family:'Fraunces',serif; font-size:19px; font-weight:600; margin:0; }
+  
+  /* Logo styling for 300x60 landscape layout */
+  .app-logo {
+    width: 300px;
+    height: 60px;
+    object-fit: contain;
+    object-position: left center;
+    display: block;
+  }
+
   .counter-pill{ display:flex; align-items:center; gap:6px; background:var(--panel-2); border:1px solid var(--line); border-radius:20px; padding:6px 12px 6px 10px; }
   .counter-pill .dot{ width:6px; height:6px; border-radius:50%; background:var(--success); }
   .counter-pill span{ font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
@@ -126,7 +135,8 @@
 
   <div class="topbar">
     <div class="topbar-row">
-      <p class="app-title">Attendance</p>
+      <!-- Hosted locally within your GitHub repository -->
+      <img src="images/logo.png" alt="Attendance Logo" class="app-logo">
       <div class="counter-pill"><span class="dot"></span><span id="countToday">0</span></div>
     </div>
     <div class="tab-switch">
@@ -269,13 +279,8 @@
 <audio id="attErrorSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
 
 <script>
-  // ---------------------------------------------------------------
-  // Backend wiring — mirrors the working callBackend() from your
-  // deployed ABBS attendance.html: same URL, same action names,
-  // same GET/POST split, same google.script.run fallback.
-  // ---------------------------------------------------------------
   const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
-  let lastBackendError = null; // last fetch failure reason, surfaced in the UI so a stalled call is never silent
+  let lastBackendError = null;
 
   async function callBackend(action, params = {}) {
     if (typeof google !== 'undefined' && google.script && google.script.run) {
@@ -285,8 +290,6 @@
           .withFailureHandler(reject)[action](...Object.values(params));
       });
     } else if (GAS_WEB_APP_URL) {
-      // Hard timeout — a stalled fetch (dropped connection, blocked request,
-      // wrong deployment access setting) must not hang the UI forever.
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
       lastBackendError = null;
@@ -320,8 +323,6 @@
         let res;
         try { res = await response.json(); }
         catch (parseErr) {
-          // Usually means Apps Script returned a Google login/HTML page instead
-          // of JSON — almost always a deployment access-setting problem.
           lastBackendError = "Response wasn't JSON — check the Web App's 'Who has access' deployment setting (should be Anyone).";
           console.error(lastBackendError, parseErr);
           return null;
@@ -359,7 +360,6 @@
     document.getElementById("countToday").textContent = todayCount;
   }
 
-  // ---------- Tab switching ----------
   function switchTab(tab) {
     const scanBtn = document.getElementById("tabScanBtn");
     const manualBtn = document.getElementById("tabManualBtn");
@@ -382,7 +382,6 @@
   document.getElementById("scanTab").style.flexDirection = "column";
   document.getElementById("scanTab").style.flex = "1";
 
-  // ---------- Loading dropdown data ----------
   async function loadProgrammes() {
     let list = await callBackend('getProgrammesList');
     if (!list) list = ["Computer Science", "Software Engineering", "Information Technology"];
@@ -464,7 +463,6 @@
     bumpCount(count || 0);
   }
 
-  // ---------- Session control ----------
   function startSession() {
     const programme = document.getElementById("setupProgramme").value;
     const semester = document.getElementById("setupSemester").value;
@@ -496,7 +494,6 @@
     document.getElementById("setupPane").style.display = "block";
   }
 
-  // ---------- Scanning + verification sheet ----------
   const sheet = document.getElementById("sheet");
   const backdrop = document.getElementById("backdrop");
   const flashEl = document.getElementById("flash");
@@ -514,7 +511,7 @@
   }
   function openSheet() { backdrop.classList.add("show"); sheet.classList.add("show"); }
   function closeSheet() {
-    currentStudent = null; // Clear student record on sheet dismiss
+    currentStudent = null;
     backdrop.classList.remove("show"); sheet.classList.remove("show");
     setTimeout(() => { if (html5QrCode) html5QrCode.resume().catch(()=>{}); }, 300);
   }
@@ -540,18 +537,13 @@
     };
   }
 
-  // Strict helper validator
   function isValidStudent(s) {
     return s && String(s.name || '').trim() !== "" && String(s.id || '').trim() !== "";
   }
 
-  // Looks up a single student by ID. Tries direct getStudentByID first;
-  // if that comes back empty or without a photo, falls back to the roster cache.
-  // Returns NULL if the student is not registered in either source.
   async function lookupStudent(scannedID) {
     let student = null;
 
-    // 1. Try direct student lookup via API
     try {
       let raw = await callBackend('getStudentByID', { studentId: scannedID });
       student = normalizeStudent(raw, scannedID);
@@ -559,7 +551,6 @@
       console.warn('Direct student lookup failed, falling back to roster cache:', err);
     }
 
-    // 2. Fallback: Search the full cached roster if direct lookup failed or lacked details/photo
     if (!isValidStudent(student) || !student.photo) {
       try {
         if (!rosterCache) {
@@ -583,7 +574,6 @@
       }
     }
 
-    // 3. Explicitly return null if no valid registered student was found
     return isValidStudent(student) ? student : null;
   }
 
@@ -591,7 +581,6 @@
     if (scannerBusy) return;
     scannerBusy = true;
 
-    // CLEAR STALE DATA IMMEDIATELY
     currentStudent = null;
 
     if (html5QrCode) { try { html5QrCode.pause(); } catch (e) {} }
@@ -605,7 +594,7 @@
     try {
       const parsed = JSON.parse(decodedText);
       scannedID = parsed.studentID || parsed.studentId || parsed.id || decodedText;
-    } catch (e) { /* raw text QR code */ }
+    } catch (e) { }
 
     photo.src = ""; photo.classList.add("pending");
     nameEl.textContent = "Looking up…"; metaEl.textContent = scannedID;
@@ -615,7 +604,6 @@
 
     const student = await lookupStudent(scannedID);
 
-    // UNREGISTERED STUDENT HANDLER
     if (!student) {
       currentStudent = null;
       flash("rgba(226,96,79,0.5)");
@@ -629,7 +617,6 @@
       return;
     }
 
-    // REGISTERED STUDENT HANDLER
     currentStudent = student;
     photo.src = student.photo || PLACEHOLDER_PHOTO;
     photo.classList.remove("pending");
@@ -667,7 +654,6 @@
   }
 
   approveBtn.addEventListener("click", async () => {
-    // GUARD CLAUSE: Strict verification check
     if (!currentStudent || !isValidStudent(currentStudent) || approveBtn.disabled) {
       alert("Cannot record attendance: No valid registered student selected.");
       return;
@@ -695,7 +681,7 @@
     } else {
       bumpCount();
       approveBtn.textContent = "Marked present ✓";
-      currentStudent = null; // Clear state after success
+      currentStudent = null;
       setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
     }
   });
@@ -703,7 +689,6 @@
   rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
   backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
 
-  // ---------- Manual mode ----------
   async function submitManual() {
     const raw = document.getElementById("manualStudent").value;
     const course = document.getElementById("manualCourse").value;
@@ -735,20 +720,23 @@
     card.classList.add("show");
     if (res && res.isDuplicate) {
       card.className = "status-card show err";
-      card.textContent = res.message || "Already recorded.";
+      card.textContent = res.message || "Attendance record already exists for this student today.";
       playAttErrorSound();
     } else {
       card.className = "status-card show ok";
-      card.textContent = `Record saved for ${student.studentName}`;
+      card.textContent = "Attendance marked successfully!";
       bumpCount();
-      setTimeout(() => card.classList.remove("show"), 3000);
+      playAttSuccessSound();
     }
   }
 
-  // ---------- Init ----------
-  loadProgrammes();
-  loadCohorts();
-  loadTodayCount();
+  // Initialize view and dropdown data on page load
+  window.addEventListener("DOMContentLoaded", () => {
+    loadProgrammes();
+    loadCohorts();
+    loadTodayCount();
+  });
 </script>
+
 </body>
 </html>
