@@ -136,7 +136,7 @@
   <div class="topbar">
     <div class="topbar-row">
       <!-- Hosted locally within your GitHub repository -->
-      <img src="abbslogo.PNG" alt="Attendance Logo" class="app-logo">
+      <img src="images/logo.png" alt="Attendance Logo" class="app-logo">
       <div class="counter-pill"><span class="dot"></span><span id="countToday">0</span></div>
     </div>
     <div class="tab-switch">
@@ -275,12 +275,21 @@
 
 </div>
 
-<audio id="attSuccessSound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
-<audio id="attErrorSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
-
 <script>
   const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
   let lastBackendError = null;
+
+  // Web Speech API Voice synthesis helper
+  function speak(text) {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel(); // Stop any ongoing speech immediately
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.lang = 'en-US';
+      window.speechSynthesis.speak(utterance);
+    }
+  }
 
   async function callBackend(action, params = {}) {
     if (typeof google !== 'undefined' && google.script && google.script.run) {
@@ -340,15 +349,6 @@
       }
     }
     return null;
-  }
-
-  function playAttSuccessSound() {
-    const s = document.getElementById("attSuccessSound");
-    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
-  }
-  function playAttErrorSound() {
-    const s = document.getElementById("attErrorSound");
-    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
   }
 
   let todayCount = 0;
@@ -613,7 +613,7 @@
         pass: false
       }]);
       approveBtn.disabled = true;
-      playAttErrorSound();
+      speak("Student not found");
       return;
     }
 
@@ -632,7 +632,7 @@
         { label: `Access Denied: status is ${student.status}`, pass: false }
       ]);
       approveBtn.disabled = true;
-      playAttErrorSound();
+      speak("Access denied. Student is inactive");
     } else {
       flash("rgba(217,164,65,0.35)");
       renderChecklist([
@@ -640,7 +640,7 @@
         { label: "Active enrollment status", pass: true }
       ]);
       approveBtn.disabled = false; approveBtn.classList.add("ready");
-      playAttSuccessSound();
+      speak("Student verified");
     }
   }
 
@@ -677,11 +677,12 @@
         { label: "Student record found", pass: true },
         { label: res.message || "Already recorded", pass: false }
       ]);
-      playAttErrorSound();
+      speak("Already registered today");
     } else {
       bumpCount();
       approveBtn.textContent = "Marked present ✓";
       currentStudent = null;
+      speak("Attendance recorded");
       setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
     }
   });
@@ -721,12 +722,12 @@
     if (res && res.isDuplicate) {
       card.className = "status-card show err";
       card.textContent = res.message || "Attendance record already exists for this student today.";
-      playAttErrorSound();
+      speak("Attendance already registered for this student today");
     } else {
       card.className = "status-card show ok";
       card.textContent = "Attendance marked successfully!";
       bumpCount();
-      playAttSuccessSound();
+      speak("Attendance saved successfully");
     }
   }
 
